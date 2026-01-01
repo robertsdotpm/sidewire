@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sidewire"
+version = "0.1.0"
+description = "Short description of your project"
+readme = "README.md"
+requires-python = ">=3.5"
+authors = [
+    {name="Matthew Roberts", email="matthew@roberts.pm"}
+]
+license = {text = "MIT"}  # or whichever license
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+
+]
