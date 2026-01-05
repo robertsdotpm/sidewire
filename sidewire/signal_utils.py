@@ -38,7 +38,6 @@ async def load_signal_pipe(node_id, af, offset, servers, msg_cb=None):
 
     return client
 
-
 """
 There's a massive problem with the MQTT client
 library. Starting it must use threading or do

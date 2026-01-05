@@ -1,9 +1,12 @@
 import json
 from ecdsa import VerifyingKey
 from aionetiface import *
-from ..plugins.punch.punch_defs import *
-from ...node.node_addr import *
+from .node_addr import *
 from .signal_defs import *
+
+TCP_PUNCH_LAN = 1
+TCP_PUNCH_REMOTE = 2
+TCP_PUNCH_SELF = 3
 
 class SigMsg():
     @staticmethod

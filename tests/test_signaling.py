@@ -1,4 +1,5 @@
-from p2pd import *
+from aionetiface import *
+import sidewire
 
 
 class TestSignaling(unittest.IsolatedAsyncioTestCase):
@@ -23,7 +24,8 @@ class TestSignaling(unittest.IsolatedAsyncioTestCase):
                 dest = (server[af], server["port"])
                 found_msg = []
 
-                client = await is_valid_mqtt(dest)
+                print(dest)
+                client = await sidewire.is_valid_mqtt(dest)
 
                 if not client:
                     print(fstr("mqtt {0} {1} broken", (af, dest,)))
