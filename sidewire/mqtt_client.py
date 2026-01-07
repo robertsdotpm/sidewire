@@ -33,16 +33,17 @@ def decode_varint_from_buffer(buf):
     return None, 0  # not enough bytes yet
 
 class MQTT:
-    def __init__(self, host, port=1883, client_id="min35"):
-        self.host = host
-        self.port = port
+    def __init__(self, dest, client_id="min35"):
+        self.host, self.port = dest
         self.client_id = client_id
         self.pipe = None
         self.buffer = b""
 
+    def __await__(self):
+        return self.connect().__await__()
+
     async def connect(self, nic=Interface("default")):
-        route = nic.route()
-        self.pipe = await Pipe(TCP, (self.host, self.port), route).connect()
+        self.pipe = await Pipe(TCP, (self.host, self.port), nic).connect()
 
         vh = (
             enc_str("MQTT") +   # protocol name
