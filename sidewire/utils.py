@@ -1,85 +1,33 @@
 from aionetiface import *
 
-def find_signal_pipe(node, addr):
-    our_offsets = list(node.signal_pipes)
-    for offset in addr["signal"]:
-        if offset in our_offsets:
-            return node.signal_pipes[offset]
+# { AF: host: pipe
+async def select_signal_pipes(signal_pipes, dest, mqtt_cls, n=1):
+    pipes = []
+    tasks = []
 
-    return None
+    # Collect shared signal pipes.
+    # Open any pipes to dest signal servers along the way.
+    for af in (IP4, IP6):
+        for signal_dest in dest["signal"][af]:
+            host, port = signal_dest
+            if host in signal_pipes[af]:
+                pipes.append(signal_pipes[af][host])
+            else:
+                async def helper():
+                    client = await mqtt_cls(signal_dest).connect()
+                    signal_pipes[af][host] = client
+                    pipes.append(client)
 
-# Make already loaded sig pipes first to try.
-def prioritize_sig_pipe_overlap(node, offsets):
-    overlap = []
-    non_overlap = []
-    for offset in offsets:
-        if offset in node.signal_pipes:
-            overlap.append(offset)
-        else:
-            non_overlap.append(offset)
+                tasks.append(helper())
+    
+    # Open the previous pipes as needed.
+    remaining = n - min(n, len(pipes))
+    if remaining:
+        [task.close() for task in tasks[:remaining]]
+        tasks = tasks[remaining:]
+        await asyncio.gather(*tasks, return_exceptions=True)
 
-    return overlap + non_overlap
-
-async def send_msg_over_mqtt(router, msg, relay_limit=2):
-    # Else loaded from a MSN.
-    buf = sig_msg_to_buf(msg)
-
-    # Try not to load a new signal pipe if
-    # one already exists for the dest.
-    dest = msg.routing.dest
-    offsets = dest["signal"]
-    offsets = prioritize_sig_pipe_overlap(router, offsets)
-
-    # Try signal pipes in order.
-    # If connect fails try another.
-    relay_count = 0
-    for i in range(0, len(offsets)):
-        # Get index referencing an MQTT server.
-        offset = offsets[i]
-
-        # Use existing sig pipe.
-        if offset in router.signal_pipes:
-            sig_pipe = router.signal_pipes[offset]
-
-        # Or load new server offset.
-        if offset not in router.signal_pipes:
-            sig_pipe = await async_wrap_errors(
-                load_signal_pipe(
-                    router.node_id,
-                    msg.routing.af,
-                    offset,
-                    MQTT_SERVERS,
-                    router.msg_cb
-                )
-            )
-
-            # Record it if success.
-            if sig_pipe:
-                router.signal_pipes[offset] = sig_pipe
-
-        # Skip invalid sig pipes.
-        if not sig_pipe:
-            continue
-
-        # Send message.
-        print("send to ", dest["node_id"], " ", offset)
-        await async_wrap_errors(
-            sig_pipe.send_msg(
-                buf,
-                to_s(dest["node_id"])
-            )
-        )
-
-        """
-        Relay message across a minimum no of MQTT servers
-        to help ensure message is received.
-        """
-        relay_count += 1
-        if relay_count >= relay_limit:
-            break
-        
-    # TODO: no paths to host.
-    # Need fallback plan here.
+    return pipes
 
 def try_unpack_msg(buf, sk, sig_proto_map):
     print("try unpack msg = ", buf)

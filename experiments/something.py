@@ -1,5 +1,5 @@
 from aionetiface import *
-from .mqtt_client import *
+from ..sidewire.mqtt_client import *
 
 async def workspace_two():
     servers = get_infra(IP4, TCP, "MQTT")

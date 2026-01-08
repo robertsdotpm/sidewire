@@ -2,8 +2,9 @@ import struct
 from aionetiface import *
 from .utils import *
 
-class MQTT:
+class MQTTClient:
     def __init__(self, dest, client_id="min35"):
+        self.dest = dest
         self.host, self.port = dest
         self.client_id = client_id
         self.pipe = None
@@ -25,6 +26,7 @@ class MQTT:
 
         # CONNACK (fixed 4 bytes)
         await self.pipe.recv()
+        return self
 
     async def publish(self, topic, payload):
         pl = mqtt_enc_str(topic) + payload.encode("utf-8")
@@ -67,6 +69,26 @@ class MQTT:
                 packet = self.buffer[:total_len]
                 self.buffer = self.buffer[total_len:]
                 got = await handle_mqtt_packet(packet)
+
+async def load_nqtt_something():
+    servers = get_infra(IP4, TCP, "MQTT")
+    mqtt_iter = seed_iter(servers, "some node id")
+
+    def select_servers(n, kv):
+        return [next(mqtt_iter) for _ in range(n)]
+
+    c = ObjCollection(
+        lambda kparams, dest=None: MQTT(**kparams, dest=dest),
+        select_servers=select_servers
+    )
+
+    out = await c.get_n(1, kv={
+            "af": IP4,
+            "proto": UDP,
+        }
+    )
+
+    print(out)
 
 async def workspace():
     m = MQTT("test.mosquitto.org")

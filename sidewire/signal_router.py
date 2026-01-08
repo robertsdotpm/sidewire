@@ -1,6 +1,33 @@
 from aionetiface import *
 from .utils import *
 from .base_msg import *
+from .mqtt_client import *
+
+async def send_msg_over_mqtt(router, msg, relay_limit=2):
+    # Else loaded from a MSN.
+    buf = sig_msg_to_buf(msg)
+
+    # Try not to load a new signal pipe if
+    # one already exists for the dest.
+    dest = msg.routing.dest
+    selected_pipes = await select_signal_pipes(
+        router.signal_pipes,
+        dest,
+        MQTTClient,
+        relay_limit
+    )
+
+    # Try signal pipes in order.
+    # If connect fails try another.
+    for sig_pipe in selected_pipes:
+        # Send message.
+        print("send to ", dest["node_id"], " ", sig_pipe.dest)
+        await async_wrap_errors(
+            sig_pipe.send_msg(
+                buf,
+                to_s(dest["node_id"])
+            )
+        )
 
 class SignalRouter():
     def __init__(self, f_time, node_id, addr_bytes, sk, proto_def):
@@ -80,6 +107,4 @@ class SignalRouter():
 
     def set_traversal_manager(self, traversal):
         self.traversal = traversal
-
-
 
