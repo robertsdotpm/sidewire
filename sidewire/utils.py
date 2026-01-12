@@ -103,7 +103,7 @@ def mqtt_enc_varint(n):
     return out
 
 def mqtt_enc_str(s):
-    b = s.encode("utf-8")
+    b = to_b(s)
     return struct.pack("!H", len(b)) + b
 
 def mqtt_decode_varint(buf):

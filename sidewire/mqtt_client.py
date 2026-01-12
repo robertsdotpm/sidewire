@@ -3,18 +3,23 @@ from aionetiface import *
 from .utils import *
 
 class MQTTClient:
-    def __init__(self, dest, client_id="min35"):
+    def __init__(self, af, nic, dest, client_id=None):
+        self.af = af
+        self.nic = nic
         self.dest = dest
         self.host, self.port = dest
-        self.client_id = client_id
+        self.client_id = client_id or rand_plain(15)
         self.pipe = None
         self.buffer = b""
+        self.f_proto = None
+        self.loop_task = None
 
     def __await__(self):
         return self.connect().__await__()
 
-    async def connect(self, nic=Interface("default")):
-        self.pipe = await Pipe(TCP, (self.host, self.port), nic).connect()
+    async def connect(self):
+        route = self.nic.route(self.af)
+        self.pipe = await Pipe(TCP, (self.host, self.port), route).connect()
 
         # proto name, proto level, clean session, keep alive 60s
         vh = (mqtt_enc_str("MQTT") + b"\x04" + b"\x02" + b"\x00\x3c")
@@ -26,6 +31,12 @@ class MQTTClient:
 
         # CONNACK (fixed 4 bytes)
         await self.pipe.recv()
+
+        # Subscribe to client id.
+        await self.subscribe(self.client_id)
+
+        # Create processing task.
+        self.loop_task = asyncio.create_task(self.loop())
         return self
 
     async def publish(self, topic, payload):
@@ -70,25 +81,37 @@ class MQTTClient:
                 self.buffer = self.buffer[total_len:]
                 got = await handle_mqtt_packet(packet)
 
-async def load_nqtt_something():
-    servers = get_infra(IP4, TCP, "MQTT")
-    mqtt_iter = seed_iter(servers, "some node id")
+                # Pass proto message on.
+                print("mqtt.loop = ", got)
+                if got and self.f_proto:
+                    self.f_proto(list(got.values())[0], (), self)
+
+
+async def load_signal_pipes(af, nic, seed_str, n):
+    # Monitor incorrectly lists TCP servers under UDP.
+    # Todo: fix this.
+    servers = get_infra(af, UDP, "MQTT", n + 1) or get_infra(af, TCP, "MQTT", n + 1)
+    servers = [(s[0]["ip"], s[0]["port"]) for s in servers]
+    mqtt_iter = seed_iter(servers, seed_str)
 
     def select_servers(n, kv):
-        return [next(mqtt_iter) for _ in range(n)]
+
+        return [next(mqtt_iter) for _ in range(0, n)]
 
     c = ObjCollection(
-        lambda kparams, dest=None: MQTT(**kparams, dest=dest),
+        lambda kparams, dest=None: MQTTClient(**kparams, dest=dest),
         select_servers=select_servers
     )
 
-    out = await c.get_n(1, kv={
-            "af": IP4,
-            "proto": UDP,
+    out = await c.get_n(n, kv={
+            "factory": {
+                "af": af,
+                "nic": nic,
+            }
         }
     )
 
-    print(out)
+    return out
 
 async def workspace():
     m = MQTT("test.mosquitto.org")

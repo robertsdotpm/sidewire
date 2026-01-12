@@ -100,10 +100,11 @@ class SignalRouter():
         )
 
     def set_signal_pipes(self, signal_pipes):
-        self.signal_pipes = signal_pipes
-        for index in self.signal_pipes:
-            signal_pipe = self.signal_pipes[index]
-            signal_pipe.f_proto = self.msg_cb
+        self.signal_pipes = {IP4: {}, IP6: {}}
+        for pipe in signal_pipes:
+            self.signal_pipes[pipe.af][pipe.host] = pipe
+            pipe.f_proto = self.msg_cb
+
 
     def set_traversal_manager(self, traversal):
         self.traversal = traversal
