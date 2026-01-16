@@ -3,21 +3,22 @@ from aionetiface import *
 from .utils import *
 
 class MQTTClient:
-    def __init__(self, af, nic, dest, client_id=None):
+    def __init__(self, af, nic, node_id, dest):
         self.af = af
         self.nic = nic
         self.dest = dest
         self.host, self.port = dest
-        self.client_id = client_id or rand_plain(15)
+        self.node_id = node_id
+        self.client_id = rand_plain(15)
         self.pipe = None
         self.buffer = b""
         self.f_proto = None
-        self.loop_task = None
 
     def __await__(self):
         return self.connect().__await__()
 
     async def connect(self):
+        print("mqtt connect")
         route = self.nic.route(self.af)
         self.pipe = await Pipe(TCP, (self.host, self.port), route).connect()
 
@@ -33,10 +34,10 @@ class MQTTClient:
         await self.pipe.recv()
 
         # Subscribe to client id.
-        await self.subscribe(self.client_id)
+        await self.subscribe(self.node_id)
 
         # Create processing task.
-        self.loop_task = asyncio.create_task(self.loop())
+        self.pipe.add_msg_cb(self.msg_cb)
         return self
 
     async def publish(self, topic, payload):
@@ -54,44 +55,42 @@ class MQTTClient:
         # SUBACK
         await self.pipe.recv()
 
-    async def loop(self):
-        while True:
-            # Receive more data into buffer
-            chunk = await self.pipe.recv()
-            if not chunk:
-                break
+    # TCP streaming protocol handler for MQTT.
+    async def msg_cb(self, chunk, client_tup, pipe):
+        # Receive more data into buffer
+        if not chunk:
+            return
 
-            self.buffer += chunk
-            while True:
-                # not enough for fixed header
-                if len(self.buffer) < 2:
-                    break  
+        # not enough for fixed header
+        self.buffer += chunk
+        if len(self.buffer) < 2:
+            return  
 
-                # need more bytes for varint
-                rem_len, consumed = mqtt_decode_varint(self.buffer[1:])
-                if rem_len is None:
-                    break  
+        # need more bytes for varint
+        rem_len, consumed = mqtt_decode_varint(self.buffer[1:])
+        if rem_len is None:
+            return  
 
-                # wait for full packet
-                total_len = 1 + consumed + rem_len
-                if len(self.buffer) < total_len:
-                    break  
+        # wait for full packet
+        total_len = 1 + consumed + rem_len
+        if len(self.buffer) < total_len:
+            return  
 
-                packet = self.buffer[:total_len]
-                self.buffer = self.buffer[total_len:]
-                got = await handle_mqtt_packet(packet)
+        packet = self.buffer[:total_len]
+        self.buffer = self.buffer[total_len:]
+        got = await handle_mqtt_packet(packet)
 
-                # Pass proto message on.
-                print("mqtt.loop = ", got)
-                if got and self.f_proto:
-                    self.f_proto(list(got.values())[0], (), self)
-
+        # When a full message is assembled pass it on.
+        print("mqtt.loop = ", got)
+        if got and self.f_proto:
+            self.f_proto(list(got.values())[0], (), self)
 
 async def load_signal_pipes(af, nic, seed_str, n):
     # Monitor incorrectly lists TCP servers under UDP.
     # Todo: fix this.
+    # TODO: this itself is random so this is not working as expected
     servers = get_infra(af, UDP, "MQTT", n + 1) or get_infra(af, TCP, "MQTT", n + 1)
-    servers = [(s[0]["ip"], s[0]["port"]) for s in servers]
+    servers = [(s[0]["fqns"][0], s[0]["port"]) for s in servers if len(s[0]["fqns"])]
     mqtt_iter = seed_iter(servers, seed_str)
 
     def select_servers(n, kv):
@@ -107,6 +106,7 @@ async def load_signal_pipes(af, nic, seed_str, n):
             "factory": {
                 "af": af,
                 "nic": nic,
+                "node_id": seed_str,
             }
         }
     )
@@ -114,11 +114,12 @@ async def load_signal_pipes(af, nic, seed_str, n):
     return out
 
 async def workspace():
-    m = MQTT("test.mosquitto.org")
+    nic = Interface("default")
+    m = MQTTClient(IP4, nic, ("test.mosquitto.org", 1883))
     await m.connect()
     await m.subscribe("test/min35")
     await m.publish("test/min35", "hello from py3.5")
-    await m.loop()
+    await asyncio.sleep(2)
 
 if __name__ == "__main__":
     async_run(workspace())

@@ -4,8 +4,13 @@ from .base_msg import *
 from .mqtt_client import *
 
 async def send_msg_over_mqtt(router, msg, relay_limit=2):
+    print("in send msg over mqtt", msg)
+
     # Else loaded from a MSN.
     buf = sig_msg_to_buf(msg)
+
+    print("dest = ", msg.routing.dest)
+    print("router.signal_pipes = ", router.signal_pipes)
 
     # Try not to load a new signal pipe if
     # one already exists for the dest.
@@ -17,15 +22,17 @@ async def send_msg_over_mqtt(router, msg, relay_limit=2):
         relay_limit
     )
 
+    print("selected sig pipes = ", selected_pipes)
+
     # Try signal pipes in order.
     # If connect fails try another.
     for sig_pipe in selected_pipes:
         # Send message.
         print("send to ", dest["node_id"], " ", sig_pipe.dest)
         await async_wrap_errors(
-            sig_pipe.send_msg(
+            sig_pipe.publish(
+                to_s(dest["node_id"]),
                 buf,
-                to_s(dest["node_id"])
             )
         )
 
@@ -63,9 +70,7 @@ class SignalRouter():
 
         # Send signaling message using MQTT.
         print("in signal msg sender")
-        await async_wrap_errors(
-            send_msg_over_mqtt(self, msg, relay_no)
-        )
+        await send_msg_over_mqtt(self, msg, relay_no)
 
         print(msg.to_dict())
 
@@ -74,21 +79,33 @@ class SignalRouter():
 
         msg = try_unpack_msg(msg, self.sk, self.proto_def)
         if to_s(msg.routing.dest["node_id"]) != self.node_id:
+            print("invalid ndoe id")
             raise Exception("Message not meant for us.")
         
         print("Got new signal msg = ", msg.to_dict())
 
         # Raise exception if this is old.
+
         msg = discard_old_msg(msg, self.seen, self.f_time)
         if not msg:
             return
 
         # Updating routing dest with current addr.
         msg.set_cur_addr(self.addr_bytes)
+
+        print("msg meta same machine is now = ", msg.meta.same_machine)
         
         # Pass this message on to existing plugin.
         # If one doesn't exist it will be created.
-        plugin = self.traversal.get_plugin(msg)
+        try:
+            plugin = self.traversal.get_plugin(msg)
+        except Exception:
+            print("get plugin failed")
+            what_exception()
+            log_exception()
+            return
+
+        print("plugin selected = ", plugin)
 
         #TODO: make this pop off older items when it fills.
         self.tasks.append(
