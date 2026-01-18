@@ -85,17 +85,16 @@ class MQTTClient:
         if got and self.f_proto:
             self.f_proto(list(got.values())[0], (), self)
 
-async def load_signal_pipes(af, nic, seed_str, n):
+async def load_signal_pipes(af, nic, seed_str, n, filter_list=[]):
     # Monitor incorrectly lists TCP servers under UDP.
     # Todo: fix this.
     # TODO: this itself is random so this is not working as expected
-    servers = get_infra(af, UDP, "MQTT", n + 1) or get_infra(af, TCP, "MQTT", n + 1)
+    servers = get_infra(af, UDP, "MQTT", sample=0)
     servers = [(s[0]["fqns"][0], s[0]["port"]) for s in servers if len(s[0]["fqns"])]
     mqtt_iter = seed_iter(servers, seed_str)
 
     def select_servers(n, kv):
-
-        return [next(mqtt_iter) for _ in range(0, n)]
+        return [next(mqtt_iter) for x in range(0, n) if x not in filter_list]
 
     c = ObjCollection(
         lambda kparams, dest=None: MQTTClient(**kparams, dest=dest),

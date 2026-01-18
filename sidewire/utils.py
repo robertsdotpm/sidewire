@@ -1,33 +1,32 @@
 from aionetiface import *
 
-# { AF: host: pipe
-async def select_signal_pipes(signal_pipes, dest, mqtt_cls, n=1):
-    pipes = []
-    tasks = []
-
-    # Collect shared signal pipes.
-    # Open any pipes to dest signal servers along the way.
+def flat_sig_pipes(sig_pipes):
+    flat = []
     for af in (IP4, IP6):
-        for signal_dest in dest["signal"][af]:
-            host, port = signal_dest
-            if host in signal_pipes[af]:
-                pipes.append(signal_pipes[af][host])
-            else:
-                async def helper():
-                    client = await mqtt_cls(signal_dest).connect()
-                    signal_pipes[af][host] = client
-                    pipes.append(client)
+        if af in sig_pipes:
+            flat += list(sig_pipes[af].values())
 
-                tasks.append(helper())
-    
-    # Open the previous pipes as needed.
-    remaining = n - min(n, len(pipes))
-    if remaining:
-        [task.close() for task in tasks[:remaining]]
-        tasks = tasks[remaining:]
-        await asyncio.gather(*tasks, return_exceptions=True)
+    return flat
 
-    return pipes
+# { AF: host: pipe
+async def select_signal_pipes(ifs, signal_pipes, dest, load_signal_pipes, n=2):
+    nic_afs = get_nic_for_af(ifs)
+    for af in (IP4, IP6):
+        new_pipes = await load_signal_pipes(
+            af=af,
+            nic=nic_afs[af],
+            seed_str=dest["node_id"],
+            n=n,
+            filter_list=[s.dest for s in flat_sig_pipes(signal_pipes)]
+        )
+
+        # Record any loaded pipes.
+        for pipe in new_pipes:
+            signal_pipes[af][pipe.host] = pipe
+
+    # TODO: for simplicity it doesn't filter pipes that don't overlap.
+    # making signaling less efficent but the code simpler.
+    return flat_sig_pipes(signal_pipes)
 
 def try_unpack_msg(buf, sk, sig_proto_map):
     print("try unpack msg = ", buf)

@@ -16,9 +16,10 @@ async def send_msg_over_mqtt(router, msg, relay_limit=2):
     # one already exists for the dest.
     dest = msg.routing.dest
     selected_pipes = await select_signal_pipes(
+        router.ifs,
         router.signal_pipes,
         dest,
-        MQTTClient,
+        load_signal_pipes,
         relay_limit
     )
 
@@ -37,7 +38,8 @@ async def send_msg_over_mqtt(router, msg, relay_limit=2):
         )
 
 class SignalRouter():
-    def __init__(self, f_time, node_id, addr_bytes, sk, proto_def):
+    def __init__(self, ifs, f_time, node_id, addr_bytes, sk, proto_def):
+        self.ifs = ifs
         self.proto_def = proto_def # eg: SIG_PROTO def in signal_msgs.py
         self.f_time = f_time
         self.node_id = to_s(node_id)
