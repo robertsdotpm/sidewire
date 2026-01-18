@@ -4,13 +4,10 @@ from .base_msg import *
 from .mqtt_client import *
 
 async def send_msg_over_mqtt(router, msg, relay_limit=2):
-    print("in send msg over mqtt", msg)
+    print("SEND: ", msg)
 
     # Else loaded from a MSN.
     buf = sig_msg_to_buf(msg)
-
-    print("dest = ", msg.routing.dest)
-    print("router.signal_pipes = ", router.signal_pipes)
 
     # Try not to load a new signal pipe if
     # one already exists for the dest.
@@ -71,10 +68,7 @@ class SignalRouter():
         msg.cipher.vk = self.vk
 
         # Send signaling message using MQTT.
-        print("in signal msg sender")
         await send_msg_over_mqtt(self, msg, relay_no)
-
-        print(msg.to_dict())
 
     def msg_cb(self, msg, client_tup, pipe):
         print("in signal router msg_cb")
@@ -84,7 +78,7 @@ class SignalRouter():
             print("invalid ndoe id")
             raise Exception("Message not meant for us.")
         
-        print("Got new signal msg = ", msg.to_dict())
+        print("RECV = ", msg.to_dict())
 
         # Raise exception if this is old.
 

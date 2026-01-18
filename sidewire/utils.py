@@ -9,7 +9,8 @@ def flat_sig_pipes(sig_pipes):
     return flat
 
 # { AF: host: pipe
-async def select_signal_pipes(ifs, signal_pipes, dest, load_signal_pipes, n=2):
+async def select_signal_pipes(ifs, signal_pipes, dest, load_signal_pipes, n=1):
+    return flat_sig_pipes(signal_pipes) # TODO
     nic_afs = get_nic_for_af(ifs)
     for af in (IP4, IP6):
         new_pipes = await load_signal_pipes(
@@ -29,7 +30,6 @@ async def select_signal_pipes(ifs, signal_pipes, dest, load_signal_pipes, n=2):
     return flat_sig_pipes(signal_pipes)
 
 def try_unpack_msg(buf, sk, sig_proto_map):
-    print("try unpack msg = ", buf)
     buf = h_to_b(buf)
 
     # Try to decrypt message if its encrypted.
@@ -75,7 +75,6 @@ def discard_old_msg(msg, seen, f_time):
 def sig_msg_to_buf(msg):
     # Else loaded from a MSN.
     dest_vk = msg.routing.dest["vk"]
-    print("Dest vk = ", dest_vk)
     if dest_vk:
         assert(isinstance(dest_vk, bytes))
         buf = b"\1" + encrypt(

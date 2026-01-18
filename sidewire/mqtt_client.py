@@ -81,7 +81,7 @@ class MQTTClient:
         got = await handle_mqtt_packet(packet)
 
         # When a full message is assembled pass it on.
-        print("mqtt.loop = ", got)
+        #print("mqtt.loop = ", got)
         if got and self.f_proto:
             self.f_proto(list(got.values())[0], (), self)
 
@@ -91,7 +91,7 @@ async def load_signal_pipes(af, nic, seed_str, n, filter_list=[]):
     # TODO: this itself is random so this is not working as expected
     servers = get_infra(af, UDP, "MQTT", sample=0)
     servers = [(s[0]["fqns"][0], s[0]["port"]) for s in servers if len(s[0]["fqns"])]
-    mqtt_iter = seed_iter(servers, seed_str)
+    mqtt_iter = seed_iter(servers, "test") # TODO
 
     def select_servers(n, kv):
         return [next(mqtt_iter) for x in range(0, n) if x not in filter_list]
