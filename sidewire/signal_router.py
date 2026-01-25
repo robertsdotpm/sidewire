@@ -1,38 +1,8 @@
+import hashlib
 from aionetiface import *
 from .utils import *
 from .base_msg import *
 from .mqtt_client import *
-
-async def send_msg_over_mqtt(router, msg, relay_limit=2):
-    print("SEND: ", msg)
-
-    # Else loaded from a MSN.
-    buf = sig_msg_to_buf(msg)
-
-    # Try not to load a new signal pipe if
-    # one already exists for the dest.
-    dest = msg.routing.dest
-    selected_pipes = await select_signal_pipes(
-        router.ifs,
-        router.signal_pipes,
-        dest,
-        load_signal_pipes,
-        relay_limit
-    )
-
-    print("selected sig pipes = ", selected_pipes)
-
-    # Try signal pipes in order.
-    # If connect fails try another.
-    for sig_pipe in selected_pipes:
-        # Send message.
-        print("send to ", dest["node_id"], " ", sig_pipe.dest)
-        await async_wrap_errors(
-            sig_pipe.publish(
-                to_s(dest["node_id"]),
-                buf,
-            )
-        )
 
 class SignalRouter():
     def __init__(self, ifs, f_time, node_id, addr_bytes, sk, proto_def):
@@ -45,6 +15,15 @@ class SignalRouter():
         self.vk = sk.verifying_key.to_string("compressed")
         self.seen = {}
         self.tasks = []
+
+    def record_seen_msg(self, buf):
+        msg_hash = hashlib.sha256(buf).digest()
+        self.seen[msg_hash] = True
+
+    def discard_seen_msg(self, buf):
+        msg_hash = hashlib.sha256(buf).digest()
+        if msg_hash in self.seen:
+            raise Exception("Message already seen.")
 
     async def signal_msg_sender(self, msg, plugin, relay_no=2):
         msg.meta = SigMsg.Meta.from_dict({
@@ -66,25 +45,40 @@ class SignalRouter():
 
         # Our key for an encrypted reply.
         msg.cipher.vk = self.vk
+        print("SEND ", msg.to_dict())
+
+        # Convert to bytes.
+        buf = sig_msg_to_buf(msg)
+        self.record_seen_msg(buf)
 
         # Send signaling message using MQTT.
-        await send_msg_over_mqtt(self, msg, relay_no)
+        await send_msg_over_mqtt(
+            self, 
+            buf, 
+            msg.routing.dest, 
+            load_signal_pipes, 
+            relay_no
+        )
 
-    def msg_cb(self, msg, client_tup, pipe):
+    # Receive a signal message and pass it to a plugin.
+    def msg_cb(self, buf, client_tup, pipe):
         print("in signal router msg_cb")
+        buf = to_b(buf)
+        self.discard_seen_msg(buf)
 
-        msg = try_unpack_msg(msg, self.sk, self.proto_def)
+        msg = try_unpack_msg(buf, self.sk, self.proto_def)
         if to_s(msg.routing.dest["node_id"]) != self.node_id:
             print("invalid ndoe id")
             raise Exception("Message not meant for us.")
         
+        # Check TTL.
+        if int(self.f_time()) >= msg.meta.ttl:
+            raise Exception("Discard old msg.")
+            return
+        
         print("RECV = ", msg.to_dict())
 
         # Raise exception if this is old.
-
-        msg = discard_old_msg(msg, self.seen, self.f_time)
-        if not msg:
-            return
 
         # Updating routing dest with current addr.
         msg.set_cur_addr(self.addr_bytes)
@@ -107,7 +101,8 @@ class SignalRouter():
         self.tasks.append(
             asyncio.create_task(
                 async_wrap_errors(
-                    plugin.run(reply=msg)
+                    self.traversal.run_plugin(plugin, reply=msg)
+                    #plugin.run(reply=msg) 
                 )
             )
         )
@@ -118,7 +113,5 @@ class SignalRouter():
             self.signal_pipes[pipe.af][pipe.host] = pipe
             pipe.f_proto = self.msg_cb
 
-
     def set_traversal_manager(self, traversal):
         self.traversal = traversal
-

@@ -29,6 +29,31 @@ async def select_signal_pipes(ifs, signal_pipes, dest, load_signal_pipes, n=1):
     # making signaling less efficent but the code simpler.
     return flat_sig_pipes(signal_pipes)
 
+async def send_msg_over_mqtt(router, buf, dest, load_signal_pipes, relay_limit=2):
+    # Try not to load a new signal pipe if
+    # one already exists for the dest.
+    selected_pipes = await select_signal_pipes(
+        router.ifs,
+        router.signal_pipes,
+        dest,
+        load_signal_pipes,
+        relay_limit
+    )
+
+    print("selected sig pipes = ", selected_pipes)
+
+    # Try signal pipes in order.
+    # If connect fails try another.
+    for sig_pipe in selected_pipes:
+        # Send message.
+        print("send to ", dest["node_id"], " ", sig_pipe.dest)
+        await async_wrap_errors(
+            sig_pipe.publish(
+                to_b(dest["node_id"]),
+                buf,
+            )
+        )
+
 def try_unpack_msg(buf, sk, sig_proto_map):
     buf = h_to_b(buf)
 
@@ -56,22 +81,6 @@ def try_unpack_msg(buf, sk, sig_proto_map):
     msg = msg_class.unpack(buf[1:])
     return msg
 
-def discard_old_msg(msg, seen, f_time):
-    # Old message?
-    pipe_id = msg.meta.pipe_id
-    if pipe_id in seen:
-        log("Discard already seen msg.")
-        return
-    else:
-        seen[pipe_id] = time.time()
-
-    # Check TTL.
-    if int(f_time()) >= msg.meta.ttl:
-        log("Discard old msg.")
-        return
-    
-    return msg
-
 def sig_msg_to_buf(msg):
     # Else loaded from a MSN.
     dest_vk = msg.routing.dest["vk"]
@@ -86,7 +95,7 @@ def sig_msg_to_buf(msg):
 
     # UTF-8 messes up binary data in MQTT.
     buf = to_h(buf)
-    return buf
+    return to_b(buf)
 
 def mqtt_enc_varint(n):
     out = b""

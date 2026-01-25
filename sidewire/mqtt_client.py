@@ -41,7 +41,7 @@ class MQTTClient:
         return self
 
     async def publish(self, topic, payload):
-        pl = mqtt_enc_str(topic) + payload.encode("utf-8")
+        pl = mqtt_enc_str(topic) + to_b(payload)
         pkt = b"\x30" + mqtt_enc_varint(len(pl)) + pl
         await self.pipe.send(pkt)
 
