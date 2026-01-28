@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sidewire"
-version = "0.1.0"
+version = "0.1.1"
 description = "Short description of your project"
 readme = "README.md"
 requires-python = ">=3.5"
@@ -18,5 +18,5 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-
+    "aionetiface"
 ]
