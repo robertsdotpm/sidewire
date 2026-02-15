@@ -45,7 +45,7 @@ class SignalRouter():
 
         # Our key for an encrypted reply.
         msg.cipher.vk = self.vk
-        print("SEND ", msg.to_dict())
+        print(self.node_id, "> SEND ", msg.routing.dest["node_id"], " ", msg.to_dict())
 
         # Convert to bytes.
         buf = sig_msg_to_buf(msg)
@@ -76,7 +76,7 @@ class SignalRouter():
             raise Exception("Discard old msg.")
             return
         
-        print("RECV = ", msg.to_dict())
+        print(self.node_id, "> RECV ", msg.meta.src["node_id"], " ", msg.to_dict())
 
         # Raise exception if this is old.
 
