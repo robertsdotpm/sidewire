@@ -1,6 +1,16 @@
 import struct
+import asyncio
+import itertools
 from aionetiface import *
 from .utils import *
+
+EVENT_CONNECT = handle_connect
+EVENT_SUBSCRIBE = handle_subscribe
+
+class ProtoEvent:
+    def __init__(self, event_type, params):
+        self.process = event_type
+        self.params = params
 
 class MQTTClient:
     def __init__(self, af, nic, node_id, dest):
@@ -11,51 +21,62 @@ class MQTTClient:
         self.node_id = node_id
         self.client_id = rand_plain(15)
         self.pipe = None
-        self.buffer = b""
+        self.buf = b""
         self.f_proto = None
+        self.events = asyncio.PriorityQueue()
+        self.event_counter = itertools.count()
 
     def __await__(self):
         return self.connect().__await__()
+    
+    async def append_event(self, event):
+        event.params["self"] = self
+        await self.events.put((next(self.event_counter), event))
+    
+    async def process_events(self):
+        while 1:
+            index, event = await self.events.get()
+            try:
+                await event.process(**event.params)
+            except Exception:
+                what_exception()
+                log_exception()
+
+                # Add event back to queue.
+                await self.events.put((index, event))
+
+                # Sleep for retry.
+                await asyncio.sleep(0.5)
+
+            print(event, event.process)
 
     async def connect(self):
-        print("mqtt connect")
-        route = self.nic.route(self.af)
-        self.pipe = await Pipe(TCP, (self.host, self.port), route).connect()
+        event = ProtoEvent(EVENT_CONNECT, {
+            "af": self.af,
+            "host": self.host,
+            "port": self.port,
+            "client_id": self.client_id,
+            "node_id": self.node_id,
+            "nic": self.nic,
+        })
 
-        # proto name, proto level, clean session, keep alive 60s
-        vh = (mqtt_enc_str("MQTT") + b"\x04" + b"\x02" + b"\x00\x3c")
-        pl = mqtt_enc_str(self.client_id)
+        await self.append_event(event)
 
-        # Full packet to send.
-        pkt = b"\x10" + mqtt_enc_varint(len(vh) + len(pl)) + vh + pl
-        await self.pipe.send(pkt)
+    async def subscribe(self, topic):
+        event = ProtoEvent(EVENT_SUBSCRIBE, {
+            "topic": topic,
+        })
 
-        # CONNACK (fixed 4 bytes)
-        await self.pipe.recv()
-
-        # Subscribe to client id.
-        await self.subscribe(self.node_id)
-
-        # Create processing task.
-        self.pipe.add_msg_cb(self.msg_cb)
-        return self
+        await self.append_event(event)
 
     async def publish(self, topic, payload):
         pl = mqtt_enc_str(topic) + to_b(payload)
         pkt = b"\x30" + mqtt_enc_varint(len(pl)) + pl
         await self.pipe.send(pkt)
 
-    async def subscribe(self, topic):
-        pkt_id = 1
-        vh = struct.pack("!H", pkt_id)
-        pl = mqtt_enc_str(topic) + b"\x00"  # QoS 0
-        pkt = b"\x82" + mqtt_enc_varint(len(vh) + len(pl)) + vh + pl
-        await self.pipe.send(pkt)
-
-        # SUBACK
-        await self.pipe.recv()
 
     # TCP streaming protocol handler for MQTT.
+    """
     async def msg_cb(self, chunk, client_tup, pipe):
         # Receive more data into buffer
         if not chunk:
@@ -84,6 +105,7 @@ class MQTTClient:
         #print("mqtt.loop = ", got)
         if got and self.f_proto:
             self.f_proto(list(got.values())[0], (), self)
+    """
 
 async def load_signal_pipes(af, nic, seed_str, n, filter_list=[]):
     # Monitor incorrectly lists TCP servers under UDP.
@@ -114,8 +136,16 @@ async def load_signal_pipes(af, nic, seed_str, n, filter_list=[]):
 
 async def workspace():
     nic = Interface("default")
-    m = MQTTClient(IP4, nic, ("test.mosquitto.org", 1883))
+    node_id = "node id"
+    #m = MQTTClient(IP4, nic, node_id, ("test.mosquitto.org", 1883))
+    m = MQTTClient(IP4, nic, node_id, ("ovh1.p2pd.net", 1883))
     await m.connect()
+    await m.subscribe(node_id)
+
+    await m.process_events()
+    return
+
+
     await m.subscribe("test/min35")
     await m.publish("test/min35", "hello from py3.5")
     await asyncio.sleep(2)

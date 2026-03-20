@@ -1,4 +1,5 @@
 from aionetiface import *
+from .mqtt_packet import *
 
 def flat_sig_pipes(sig_pipes):
     flat = []
@@ -144,3 +145,78 @@ async def handle_mqtt_packet(buf):
         msg = data[2+tlen:].decode("utf-8", "ignore")
         return {topic: msg}
         print("RECV:", topic, msg)
+
+async def handle_connect(self, af, host, port, client_id, node_id, nic):
+    print("mqtt connect")
+    route = nic.route(af)
+    pipe = await Pipe(TCP, (host, port), route).connect()
+
+    # proto name, proto level, clean session, keep alive 60s
+    vh = (mqtt_enc_str("MQTT") + b"\x04" + b"\x02" + b"\x00\x3c")
+    pl = mqtt_enc_str(client_id)
+
+    # Full packet to send.
+    pkt = b"\x10" + mqtt_enc_varint(len(vh) + len(pl)) + vh + pl
+    await pipe.send(pkt)
+
+    # CONNACK (fixed 4 bytes)
+    got = await asyncio.wait_for(pipe.recv_n(4), 4)
+    if got != b' \x02\x00\x00':
+        await pipe.close()
+        raise BadProtoResp("Invalid CON ACK")
+    
+    self.pipe = pipe
+    print("mqtt Connected success")
+    return
+
+
+
+    """
+    # Subscribe to client id.
+    await self.subscribe(self.node_id)
+
+    # Create processing task.
+    self.pipe.add_msg_cb(self.msg_cb)
+    return self
+    """
+
+"""
+Handle a stream of data down a buffer for TCP,
+returning the first valid MQTT packet. Surplus
+data is kept on the buffer for subsequent reads.
+"""
+async def recv_mqtt_pkt(self):
+    while 1:
+        self.buf += await self.pipe.recv()
+        if len(self.buf) < 2:
+            await asyncio.sleep(0.4)
+            continue
+
+        # need more bytes for varint
+        rem_len, consumed = mqtt_decode_varint(self.buf[1:])
+        if rem_len is None:
+            continue  
+
+        # wait for full packet
+        total_len = 1 + consumed + rem_len
+        if len(self.buf) < total_len:
+            continue  
+
+        packet = self.buf[:total_len]
+        self.buf = self.buf[total_len:]
+        return packet
+
+async def handle_subscribe(self, topic):
+    pkt_id = 1
+    vh = struct.pack("!H", pkt_id)
+    pl = mqtt_enc_str(topic) + b"\x00"  # QoS 0
+    pkt = b"\x82" + mqtt_enc_varint(len(vh) + len(pl)) + vh + pl
+    await self.pipe.send(pkt)
+
+    # SUBACK
+    pkt_buf = await recv_mqtt_pkt(self)
+    print("pkt buf = ", pkt_buf)
+    pkt = mqtt_parse_packet(pkt_buf)
+    pkt.debug_print()
+
+    print("sub pkt = ", pkt)
