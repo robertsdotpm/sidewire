@@ -114,21 +114,6 @@ def mqtt_enc_str(s):
     b = to_b(s)
     return struct.pack("!H", len(b)) + b
 
-def mqtt_decode_varint(buf):
-    """Return (value, num_bytes_consumed)"""
-    mul = 1
-    val = 0
-    consumed = 0
-    for b in buf:
-        val += (b & 0x7f) * mul
-        consumed += 1
-        if not (b & 0x80):
-            return val, consumed
-        mul *= 128
-        if mul > 128**4:
-            raise ValueError("Malformed variable-length int")
-    return None, 0  # not enough bytes yet
-
 async def handle_mqtt_packet(buf):
     pkt_type = buf[0] >> 4
     # remaining length ignored here, already parsed
@@ -165,9 +150,9 @@ async def handle_connect(self, af, host, port, client_id, node_id, nic):
         await pipe.close()
         raise BadProtoResp("Invalid CON ACK")
     
-    self.pipe = pipe
+
     print("mqtt Connected success")
-    return
+    return pipe
 
 
 
@@ -213,10 +198,11 @@ async def handle_subscribe(self, topic):
     pkt = b"\x82" + mqtt_enc_varint(len(vh) + len(pl)) + vh + pl
     await self.pipe.send(pkt)
 
-    # SUBACK
-    pkt_buf = await recv_mqtt_pkt(self)
-    print("pkt buf = ", pkt_buf)
-    pkt = mqtt_parse_packet(pkt_buf)
-    pkt.debug_print()
 
     print("sub pkt = ", pkt)
+
+async def handle_publish(self, topic, payload):
+    pl = mqtt_enc_str(topic) + to_b(payload)
+    pkt = b"\x30" + mqtt_enc_varint(len(pl)) + pl
+    await self.pipe.send(pkt)
+

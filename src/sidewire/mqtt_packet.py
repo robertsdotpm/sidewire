@@ -19,20 +19,26 @@ def mqtt_encode_varint(value):
         
     return bytes(encoded)
 
-def mqtt_decode_varint(data, offset):
+def mqtt_decode_varint(buf, offset):
     multiplier = 1
     value = 0
-    while True:
-        byte = data[offset]
-        offset += 1
+    consumed = 0
 
-        value += (byte & 127) * multiplier
-        if (byte & 128) == 0:
-            break
+    for i in range(4):  # max 4 bytes
+        if offset + i >= len(buf):
+            return None, None
+
+        byte = buf[offset + i]
+        consumed += 1
+
+        value += (byte & 0x7F) * multiplier
+
+        if (byte & 0x80) == 0:
+            return value, consumed
 
         multiplier *= 128
 
-    return value, offset
+    raise ValueError("Malformed Remaining Length")
 
 def mqtt_build_header(remaining_length, packet_type, flags):
     packet_type_part = int(packet_type) << 4
@@ -43,7 +49,7 @@ def mqtt_build_header(remaining_length, packet_type, flags):
         mqtt_encode_varint(remaining_length)
     )
 
-class MQTTPacketType(IntEnum):
+class MQTTEnum(IntEnum):
     CONNECT = 1
     CONNACK = 2
     PUBLISH = 3
@@ -61,7 +67,7 @@ class MQTTPacketType(IntEnum):
 
 class MQTTPacket:
     def __init__(self, packet_type, flags=0):
-        self.packet_type = MQTTPacketType(packet_type)
+        self.type = MQTTEnum(packet_type)
         self.flags = flags
         self.variable_header = b""
         self.payload = b""
@@ -82,7 +88,7 @@ class MQTTPacket:
         body = self.variable_header + self.payload
         fixed = mqtt_build_header(
             len(body), # Total packet len.
-            self.packet_type, 
+            self.type, 
             self.flags
         )
 
@@ -96,40 +102,63 @@ class MQTTPacket:
     
     def debug_print(self):
         print("mqtt pkt debug print = ")
-        print(self.packet_type)
+        print(self.type)
         print(self.payload)
+
+def mqtt_parse_publish(packet):
+    body = packet.body
+    offset = 0
+
+    # Topic length
+    if len(body) < 2:
+        return None
+
+    tlen = struct.unpack("!H", body[offset:offset + 2])[0]
+    offset += 2
+
+    # Topic
+    if len(body) < offset + tlen:
+        return None
+
+    topic = to_s(body[offset:offset + tlen])
+    offset += tlen
+
+    # QoS > 0 => packet identifier present
+    qos = (packet.flags >> 1) & 0x03
+    packet_id = None
+
+    if qos > 0:
+        if len(body) < offset + 2:
+            return None
+        packet_id = struct.unpack("!H", body[offset:offset + 2])[0]
+        offset += 2
+
+    # Payload
+    payload = to_s(body[offset:])
+
+    return topic, payload, packet_id
     
 def mqtt_parse_packet(raw):
     offset = 0
 
+    # Fixed header byte
     first_byte = raw[offset]
     offset += 1
 
     packet_type = first_byte >> 4
     flags = first_byte & 0x0F
 
-    remaining_length, offset = mqtt_decode_varint(raw, offset)
+    # Remaining Length (varint)
+    remaining_length, consumed = mqtt_decode_varint(raw, offset)
+    offset += consumed
 
+    # Extract full body (variable header + payload, unparsed)
     body = raw[offset:offset + remaining_length]
 
     pkt = MQTTPacket(packet_type, flags)
 
-    # NOTE: Generic split assumption:
-    # Many packets have a 2-byte packet id at start of variable header.
-    # For simplicity, we treat first 2 bytes as variable header if applicable.
-    variable_header = b""
-    payload = b""
-
-    if packet_type in MQTTPacketType:
-        variable_header = body[:2]
-        payload = body[2:]
-    else:
-        # For other packet types, you’d need type-specific parsing
-        variable_header = body
-        payload = b""
-
-    pkt.variable_header = variable_header
-    pkt.payload = payload
+    # Do NOT attempt to interpret variable header or payload here
+    pkt.body = body
 
     return pkt
 
@@ -138,7 +167,7 @@ if __name__ == "__main__":
     topic = "test/topic"
     packet_id = 1
 
-    pkt = MQTTPacket(MQTTPacketType.SUBSCRIBE, flags=0x02)
+    pkt = MQTTPacket(MQTTEnum.SUBSCRIBE, flags=0x02)
 
     # Variable header: Packet Identifier
     pkt.set_packet_id(packet_id)

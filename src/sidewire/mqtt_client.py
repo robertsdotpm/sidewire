@@ -1,8 +1,16 @@
+"""
+design doesnt work. in the future messages will be received in any order
+async for different events and a list of waiting events needs to try
+match them.
+"""
+
+
 import struct
 import asyncio
 import itertools
 from aionetiface import *
 from .utils import *
+from .mqtt_packet import *
 
 EVENT_CONNECT = handle_connect
 EVENT_SUBSCRIBE = handle_subscribe
@@ -23,6 +31,8 @@ class MQTTClient:
         self.pipe = None
         self.buf = b""
         self.f_proto = None
+        self.subscriptions = set()
+
         self.events = asyncio.PriorityQueue()
         self.event_counter = itertools.count()
 
@@ -51,61 +61,86 @@ class MQTTClient:
             print(event, event.process)
 
     async def connect(self):
-        event = ProtoEvent(EVENT_CONNECT, {
-            "af": self.af,
-            "host": self.host,
-            "port": self.port,
-            "client_id": self.client_id,
-            "node_id": self.node_id,
-            "nic": self.nic,
-        })
+        pipe = await handle_connect(
+            self,
+            self.af,
+            self.host,
+            self.port,
+            self.client_id,
+            self.node_id,
+            self.nic
+        )
 
-        await self.append_event(event)
+        if pipe:
+            pipe.add_msg_cb(self.mqtt_packet_reader)
+            self.pipe = pipe
 
     async def subscribe(self, topic):
-        event = ProtoEvent(EVENT_SUBSCRIBE, {
-            "topic": topic,
-        })
-
-        await self.append_event(event)
+        if topic in self.subscriptions:
+            return
+        
+        await handle_subscribe(self, topic)
+        self.subscriptions.add(topic)
 
     async def publish(self, topic, payload):
-        pl = mqtt_enc_str(topic) + to_b(payload)
-        pkt = b"\x30" + mqtt_enc_varint(len(pl)) + pl
-        await self.pipe.send(pkt)
+        await handle_publish(self, topic, payload)
 
+    async def handle_mqtt_packet(self, packet):
+        packet.debug_print()
+
+        print("in handle mqtt pack")
+
+        if MQTTEnum.PUBLISH == packet.type:
+            out = mqtt_parse_publish(packet)
+            if not out:
+                return
+            
+            topic, payload, packet_id = out
+            if topic not in self.subscriptions:
+                return
+            
+            print("Got message at ", topic, " content = ", payload)
 
     # TCP streaming protocol handler for MQTT.
-    """
-    async def msg_cb(self, chunk, client_tup, pipe):
-        # Receive more data into buffer
+    async def mqtt_packet_reader(self, chunk, client_tup, pipe):
+        print("got chunk = ", chunk)
         if not chunk:
+            print("not chunk")
             return
 
-        # not enough for fixed header
-        self.buffer += chunk
-        if len(self.buffer) < 2:
-            return  
+        # append incoming data
+        self.buf += chunk
 
-        # need more bytes for varint
-        rem_len, consumed = mqtt_decode_varint(self.buffer[1:])
-        if rem_len is None:
-            return  
+        # process as many complete packets as possible
+        while self.buf:
+            # need at least fixed header + 1 byte of remaining length
+            if len(self.buf) < 2:
+                print("need at least fixed header", self.buf)
+                return
 
-        # wait for full packet
-        total_len = 1 + consumed + rem_len
-        if len(self.buffer) < total_len:
-            return  
+            # decode remaining length (starts at byte 1)
+            rem_len, consumed = mqtt_decode_varint(self.buf, 1)
+            if rem_len is None:
+                print("rem len is none", self.buf)
+                return
 
-        packet = self.buffer[:total_len]
-        self.buffer = self.buffer[total_len:]
-        got = await handle_mqtt_packet(packet)
+            # total packet size = fixed header (1) + varint + payload
+            total_len = 1 + consumed + rem_len
 
-        # When a full message is assembled pass it on.
-        #print("mqtt.loop = ", got)
-        if got and self.f_proto:
-            self.f_proto(list(got.values())[0], (), self)
-    """
+            # wait for full packet
+            if len(self.buf) < total_len:
+                print("wait for full packet", self.buf)
+                return
+
+            # extract packet
+            pkt_buf = self.buf[:total_len]
+            self.buf = self.buf[total_len:]
+
+            print("pkt buf = ", pkt_buf)
+
+            # parse + handle
+            pkt = mqtt_parse_packet(pkt_buf)
+            await self.handle_mqtt_packet(pkt)
 
 async def load_signal_pipes(af, nic, seed_str, n, filter_list=[]):
     # Monitor incorrectly lists TCP servers under UDP.
@@ -140,15 +175,17 @@ async def workspace():
     #m = MQTTClient(IP4, nic, node_id, ("test.mosquitto.org", 1883))
     m = MQTTClient(IP4, nic, node_id, ("ovh1.p2pd.net", 1883))
     await m.connect()
-    await m.subscribe(node_id)
 
-    await m.process_events()
-    return
+
+    #await m.subscribe(node_id)
+
+    #await m.process_events()
+
 
 
     await m.subscribe("test/min35")
     await m.publish("test/min35", "hello from py3.5")
-    await asyncio.sleep(2)
+    await asyncio.sleep(4)
 
 if __name__ == "__main__":
     async_run(workspace())
