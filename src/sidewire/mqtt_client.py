@@ -31,7 +31,7 @@ topic (33 their pub key)
 """
 
 
-
+import hashlib
 import asyncio
 from aionetiface import *
 from .utils import *
@@ -108,9 +108,10 @@ class MQTTClient:
         # Signed message section.
         signed_msg = plugin_id + msg
         sig = self.kp.private_key.sign(
-            signed_msg,
+            to_b(signed_msg),
             sigencode=util.sigencode_string
         )
+        sig = to_h(sig)
         assert(len(sig) == 128)
 
         # Our public key.
@@ -125,6 +126,8 @@ class MQTTClient:
         await self.publish(dest_pk_hex, out)
 
     async def publish(self, topic, payload):
+        assert(is_ascii(topic))
+        assert(is_ascii(payload))
         await handle_publish(self, topic, payload)
 
     async def handle_mqtt_packet(self, packet):
@@ -142,7 +145,28 @@ class MQTTClient:
             if topic not in self.subscriptions:
                 return
             
-            print("Got message at ", topic, " content = ", payload)
+            compact_public_key = h_to_b(topic)
+            if compact_public_key != self.kp.compact_public_key:
+                print("Recv msg not meant for us.")
+
+            src_pk_hex = h_to_b(payload[:66]); p = 66
+            sig = h_to_b(payload[p:p + 128]); p += 128
+            signed_msg = to_b(payload[p:])
+            plugin_id = payload[p:p + 64]; p += 64
+            msg = payload[p:]
+
+            print(
+                "siggn verify result =",
+                self.kp.public_key.verify(
+                    sig,
+                    signed_msg,
+                    sigdecode=util.sigdecode_string
+                )
+            )
+
+            print("signed message for us = ", msg)
+
+            #print("Got message at ", topic, " content = ", payload)
 
         # Handle ping from server.
         if MQTTEnum.PINGRESP == packet.type:
@@ -228,11 +252,15 @@ async def workspace():
 
 
     alice_kp = Signing.keypair()
-
+    alice_plugin_id = hashlib.sha256(b"alice plugin").hexdigest()
     alice_client = MQTTClient(IP4, nic, ("ovh1.p2pd.net", 1883), alice_kp)
     await alice_client.connect()
     await asyncio.sleep(2)
-    await alice_client.publish(alice_kp.compact_public_key, b"hello test")
+    await alice_client.send(
+        "hello thar", 
+        to_h(alice_kp.compact_public_key),
+        alice_plugin_id
+    )
     
 
     await asyncio.sleep(4)
