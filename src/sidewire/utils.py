@@ -196,16 +196,21 @@ async def recv_mqtt_pkt(self):
         self.buf = self.buf[total_len:]
         return packet
 
-async def handle_subscribe(self, topic):
-    pkt_id = 1
-    vh = struct.pack("!H", pkt_id)
+async def handle_subscribe(self, topic, packet_id):
+    vh = packet_id
     pl = mqtt_enc_str(topic) + b"\x01"  # QoS 1
     pkt = b"\x82" + mqtt_enc_varint(len(vh) + len(pl)) + vh + pl
     await self.pipe.send(pkt)
     print("sub pkt = ", pkt)
 
-async def handle_publish(self, topic, payload):
-    pl = mqtt_enc_str(topic) + to_b(payload)
-    pkt = b"\x30" + mqtt_enc_varint(len(pl)) + pl
-    await self.pipe.send(pkt)
+async def handle_publish(self, topic, payload, packet_id):
+    # Build variable header:
+    # Topic (UTF-8 length-prefixed) + Packet Identifier (2 bytes)
+    topic_bytes = mqtt_enc_str(topic)
+    pl = topic_bytes + packet_id + to_b(payload)
 
+    # Fixed header:
+    # 0x32 = PUBLISH with QoS 1 (bits 1-2 set to 01)
+    pkt = b"\x32" + mqtt_enc_varint(len(pl)) + pl
+
+    await self.pipe.send(pkt)

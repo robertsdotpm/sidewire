@@ -28,6 +28,7 @@ topic (33 their pub key)
     msg format: 33 our_pub_key, 64 sig over ( 32 plugin_id, msg )
     ^ allows ack back
 
+do mqtt packet ides first then do the app level ack stuff
 """
 
 
@@ -60,6 +61,15 @@ class MQTTClient:
         self.buf = b""
         self.subscriptions = set()
         self.keep_alive_task = None
+
+        # [packet enum][packet id] = future
+        self.packet_ids = {
+            MQTTEnum.SUBSCRIBE: {},
+            MQTTEnum.PUBLISH: {},
+        }
+
+        # Plugin message system [plugin id] -> list[{msg meta}] queue
+        self.msg_queues = {} 
 
     def __await__(self):
         return self.connect().__await__()
@@ -98,7 +108,9 @@ class MQTTClient:
         if topic in self.subscriptions:
             return
         
-        await handle_subscribe(self, topic)
+        packet_id, packet_ack = self.packet_ack_future(MQTTEnum.SUBSCRIBE)
+        await handle_subscribe(self, topic, packet_id)
+        ack_status = await packet_ack # TODO: check result
         self.subscriptions.add(topic)
 
     async def send(self, msg, dest_pk_hex, plugin_id):
@@ -120,20 +132,60 @@ class MQTTClient:
 
         # Full proto message to send.
         out = src_pk_hex + sig + plugin_id + msg
+        assert(type(out) == str)
         assert(len(out) == (258 + len(msg)))
+        
+        # Create queue per plugin ID.
+        if plugin_id not in self.msg_queues:
+            self.msg_queues[plugin_id] = []
+
+        # Queue message.
+        self.msg_queues[plugin_id].append({
+            "attempts": 0,
+            "dest_pk_hex": dest_pk_hex,
+            "out": out,
+            "acked": asyncio.Event()
+        })
         
         # Publish the message as intended.
         await self.publish(dest_pk_hex, out)
 
+    def get_unique_packet_id(self, packet_type):
+        for _ in range(0, 10000):
+            packet_id = rand_b(2)
+            if packet_id not in self.packet_ids[packet_type]:
+                return packet_id
+            
+        raise Exception("Could not get unique packet id")
+    
+    def packet_ack_future(self, packet_type):
+        packet_id = self.get_unique_packet_id(packet_type)
+        packet_ack = asyncio.Future()
+        self.packet_ids[packet_type][packet_id] = packet_ack
+        return packet_id, packet_ack
+
     async def publish(self, topic, payload):
         assert(is_ascii(topic))
         assert(is_ascii(payload))
-        await handle_publish(self, topic, payload)
+        packet_id, packet_ack = self.packet_ack_future(MQTTEnum.PUBLISH)
+        await handle_publish(self, topic, payload, packet_id)
+        return packet_ack
 
     async def handle_mqtt_packet(self, packet):
         packet.debug_print()
 
         print("in handle mqtt pack")
+
+        # Handle puback.
+        if MQTTEnum.PUBACK == packet.type:
+            print("got puback")
+            print("puback var header = ", packet.body)
+            print("len body = ", len(packet.body))
+            assert(len(packet.body) == 2)
+            packet_id = packet.body
+            if packet_id in self.packet_ids:
+                self.packet_ids.discard(packet_id)
+                print("ack packet id", packet_id)
 
         # Handle receive channel message.
         if MQTTEnum.PUBLISH == packet.type:
@@ -144,6 +196,9 @@ class MQTTClient:
             topic, payload, packet_id = out
             if topic not in self.subscriptions:
                 return
+            
+            assert(is_ascii(topic))
+            assert(is_ascii(payload))
             
             compact_public_key = h_to_b(topic)
             if compact_public_key != self.kp.compact_public_key:
