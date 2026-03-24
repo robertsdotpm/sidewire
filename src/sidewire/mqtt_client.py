@@ -64,8 +64,8 @@ class MQTTClient:
 
         # [packet enum][packet id] = future
         self.packet_ids = {
-            MQTTEnum.SUBSCRIBE: {},
-            MQTTEnum.PUBLISH: {},
+            MQTTEnum.SUBACK: {},
+            MQTTEnum.PUBACK: {},
         }
 
         # Plugin message system [plugin id] -> list[{msg meta}] queue
@@ -101,16 +101,30 @@ class MQTTClient:
             repeat_every(keep_alive, self.mqtt_keep_alive)
         )
 
-    async def subscribe(self, topic):
+    async def subscribe(self, topic, timeout=4):
+        # Stick to ascii for topics.
         if type(topic) == bytes:
             topic = to_h(topic)
 
+        # Already subscribed.
         if topic in self.subscriptions:
             return
         
-        packet_id, packet_ack = self.packet_ack_future(MQTTEnum.SUBSCRIBE)
+        # Call function to send a subscribe packet.
+        packet_id, packet_ack = self.packet_ack_future(MQTTEnum.SUBACK)
         await handle_subscribe(self, topic, packet_id)
-        ack_status = await packet_ack # TODO: check result
+
+        # Wait for acknowledgement from server.
+        return_codes = await asyncio.wait_for(packet_ack, timeout)
+
+        # Only accept QoS 1 -- errors or downgrades = no.
+        for _, code in enumerate(return_codes):
+            print("got return code = ", code)
+            if code != 1: # QoS 1
+                raise Exception("Invalid sub ack code " + str(code))
+
+        # Record subscription success.
+        print("acked subscribe.")
         self.subscriptions.add(topic)
 
     async def send(self, msg, dest_pk_hex, plugin_id):
@@ -167,7 +181,7 @@ class MQTTClient:
     async def publish(self, topic, payload):
         assert(is_ascii(topic))
         assert(is_ascii(payload))
-        packet_id, packet_ack = self.packet_ack_future(MQTTEnum.PUBLISH)
+        packet_id, packet_ack = self.packet_ack_future(MQTTEnum.PUBACK)
         await handle_publish(self, topic, payload, packet_id)
         return packet_ack
 
@@ -176,15 +190,26 @@ class MQTTClient:
 
         print("in handle mqtt pack")
 
-        # Handle puback.
-        if MQTTEnum.PUBACK == packet.type:
-            print("got puback")
-            print("puback var header = ", packet.body)
-            print("len body = ", len(packet.body))
-            assert(len(packet.body) == 2)
-            packet_id = packet.body
-            if packet_id in self.packet_ids:
-                self.packet_ids.discard(packet_id)
+        # Main packets to 
+        for packet_type in (MQTTEnum.PUBACK, MQTTEnum.SUBACK):
+            if packet_type == packet.type:
+                print("got mqtt ack")
+                print("puback var header = ", packet.body)
+                print("len body = ", len(packet.body))
+
+                #assert(len(packet.body) == 2)
+                # Strip packet_id from variable header.
+                packet_id = packet.body[:2]
+                if packet_id not in self.packet_ids[packet_type]:
+                    return
+
+                # Future to signal ack received for certain packets.
+                ack_future = self.packet_ids[packet_type][packet_id]
+                if ack_future.done():
+                    return
+                
+                # Sets the return code only for SUBACK otherwise empty str.
+                ack_future.set_result(packet.body[2:])
                 print("ack packet id", packet_id)
 
         # Handle receive channel message.
