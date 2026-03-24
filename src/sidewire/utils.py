@@ -131,13 +131,18 @@ async def handle_mqtt_packet(buf):
         return {topic: msg}
         print("RECV:", topic, msg)
 
-async def handle_connect(self, af, host, port, client_id, node_id, nic):
+async def handle_connect(self, af, host, port, client_id, nic, keep_alive=60):
     print("mqtt connect")
     route = nic.route(af)
     pipe = await Pipe(TCP, (host, port), route).connect()
 
     # proto name, proto level, clean session, keep alive 60s
-    vh = (mqtt_enc_str("MQTT") + b"\x04" + b"\x02" + b"\x00\x3c")
+    vh = (
+        mqtt_enc_str("MQTT") + 
+        b"\x04" + 
+        b"\x02" + 
+        struct.pack("!H", keep_alive)
+    )
     pl = mqtt_enc_str(client_id)
 
     # Full packet to send.
@@ -194,11 +199,9 @@ async def recv_mqtt_pkt(self):
 async def handle_subscribe(self, topic):
     pkt_id = 1
     vh = struct.pack("!H", pkt_id)
-    pl = mqtt_enc_str(topic) + b"\x00"  # QoS 0
+    pl = mqtt_enc_str(topic) + b"\x01"  # QoS 1
     pkt = b"\x82" + mqtt_enc_varint(len(vh) + len(pl)) + vh + pl
     await self.pipe.send(pkt)
-
-
     print("sub pkt = ", pkt)
 
 async def handle_publish(self, topic, payload):

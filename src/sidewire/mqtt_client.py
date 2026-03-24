@@ -2,18 +2,43 @@
 design doesnt work. in the future messages will be received in any order
 async for different events and a list of waiting events needs to try
 match them.
+
+publishing side:
+    PUBACK (for QoS 1)
+
+    
+    DISCONNECT (optional but important)
+    TCP close/reset
+        everything should be resumable.
+
+
+msg queue ...
+    plugin id
+        await ack from actual dest before sending next
+        pop
+
+    can continue to next msg queued for next plugin before the other returns
+
+provides ordered guaranteed with signed ack to dest
+
+send(msg, dest_pub_key, plugin_id)
+
+topic (33 their pub key)
+    in bytes -- double all for hex
+    msg format: 33 our_pub_key, 64 sig over ( 32 plugin_id, msg )
+    ^ allows ack back
+
 """
 
 
-import struct
+
 import asyncio
-import itertools
 from aionetiface import *
 from .utils import *
+from .signing import *
 from .mqtt_packet import *
 
-EVENT_CONNECT = handle_connect
-EVENT_SUBSCRIBE = handle_subscribe
+MQTT_KEEP_ALIVE = 60
 
 class ProtoEvent:
     def __init__(self, event_type, params):
@@ -21,45 +46,24 @@ class ProtoEvent:
         self.params = params
 
 class MQTTClient:
-    def __init__(self, af, nic, node_id, dest):
+    def __init__(self, af, nic, dest, kp):
         self.af = af
         self.nic = nic
         self.dest = dest
         self.host, self.port = dest
-        self.node_id = node_id
+        self.kp = kp # Key pair -- defines our
+
+
+
         self.client_id = rand_plain(15)
         self.pipe = None
         self.buf = b""
-        self.f_proto = None
         self.subscriptions = set()
-
-        self.events = asyncio.PriorityQueue()
-        self.event_counter = itertools.count()
+        self.keep_alive_task = None
 
     def __await__(self):
         return self.connect().__await__()
     
-    async def append_event(self, event):
-        event.params["self"] = self
-        await self.events.put((next(self.event_counter), event))
-    
-    async def process_events(self):
-        while 1:
-            index, event = await self.events.get()
-            try:
-                await event.process(**event.params)
-            except Exception:
-                what_exception()
-                log_exception()
-
-                # Add event back to queue.
-                await self.events.put((index, event))
-
-                # Sleep for retry.
-                await asyncio.sleep(0.5)
-
-            print(event, event.process)
-
     async def connect(self):
         pipe = await handle_connect(
             self,
@@ -67,20 +71,58 @@ class MQTTClient:
             self.host,
             self.port,
             self.client_id,
-            self.node_id,
-            self.nic
+            self.nic,
+            keep_alive=MQTT_KEEP_ALIVE
         )
 
-        if pipe:
-            pipe.add_msg_cb(self.mqtt_packet_reader)
-            self.pipe = pipe
+        if not pipe:
+            raise Exception("could not connect.")
+        
+        # Start processing responses async from server.
+        self.pipe = pipe
+        pipe.add_msg_cb(self.mqtt_packet_reader)
+
+        # Subscribe to messages to our own public key.
+        await self.subscribe(self.kp.compact_public_key)
+
+        # Periodically send ping requests to server.
+        keep_alive = int(MQTT_KEEP_ALIVE / 2)
+        self.keep_alive_task = asyncio.create_task(
+            repeat_every(keep_alive, self.mqtt_keep_alive)
+        )
 
     async def subscribe(self, topic):
+        if type(topic) == bytes:
+            topic = to_h(topic)
+
         if topic in self.subscriptions:
             return
         
         await handle_subscribe(self, topic)
         self.subscriptions.add(topic)
+
+    async def send(self, msg, dest_pk_hex, plugin_id):
+        assert(len(plugin_id) == 64)
+        assert(len(dest_pk_hex) == 66)
+
+        # Signed message section.
+        signed_msg = plugin_id + msg
+        sig = self.kp.private_key.sign(
+            signed_msg,
+            sigencode=util.sigencode_string
+        )
+        assert(len(sig) == 128)
+
+        # Our public key.
+        src_pk_hex = to_h(self.kp.compact_public_key) # 66
+        assert(len(src_pk_hex) == 66)
+
+        # Full proto message to send.
+        out = src_pk_hex + sig + plugin_id + msg
+        assert(len(out) == (258 + len(msg)))
+        
+        # Publish the message as intended.
+        await self.publish(dest_pk_hex, out)
 
     async def publish(self, topic, payload):
         await handle_publish(self, topic, payload)
@@ -90,6 +132,7 @@ class MQTTClient:
 
         print("in handle mqtt pack")
 
+        # Handle receive channel message.
         if MQTTEnum.PUBLISH == packet.type:
             out = mqtt_parse_publish(packet)
             if not out:
@@ -100,6 +143,16 @@ class MQTTClient:
                 return
             
             print("Got message at ", topic, " content = ", payload)
+
+        # Handle ping from server.
+        if MQTTEnum.PINGRESP == packet.type:
+            print("got ping response.")
+            return
+    
+    async def mqtt_keep_alive(self):
+        req = MQTTPacket(MQTTEnum.PINGREQ)
+        buf = req.build()
+        await self.pipe.send(buf)
 
     # TCP streaming protocol handler for MQTT.
     async def mqtt_packet_reader(self, chunk, client_tup, pipe):
@@ -170,11 +223,20 @@ async def load_signal_pipes(af, nic, seed_str, n, filter_list=[]):
     return out
 
 async def workspace():
+        #m = MQTTClient(IP4, nic, node_id, ("test.mosquitto.org", 1883))
     nic = Interface("default")
-    node_id = "node id"
-    #m = MQTTClient(IP4, nic, node_id, ("test.mosquitto.org", 1883))
-    m = MQTTClient(IP4, nic, node_id, ("ovh1.p2pd.net", 1883))
-    await m.connect()
+
+
+    alice_kp = Signing.keypair()
+
+    alice_client = MQTTClient(IP4, nic, ("ovh1.p2pd.net", 1883), alice_kp)
+    await alice_client.connect()
+    await asyncio.sleep(2)
+    await alice_client.publish(alice_kp.compact_public_key, b"hello test")
+    
+
+    await asyncio.sleep(4)
+    return
 
 
     #await m.subscribe(node_id)
