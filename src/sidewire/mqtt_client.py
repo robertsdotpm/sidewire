@@ -248,15 +248,18 @@ class MQTTClient:
                 print("topic not in subscriptions.")
                 return
             
+            # Sanity checks match client formats.
             assert(is_ascii(topic))
             assert(is_ascii(payload))
             
+            # Only interested in messages for our pub key.
             compact_public_key = h_to_b(topic)
             if compact_public_key != self.kp.compact_public_key:
                 print("Recv msg not meant for us.")
 
             print("payload = ", payload)
 
+            # Unpack fields from payload.
             src_pk_hex = payload[:66]; p = 66
             sig = h_to_b(payload[p:p + 128]); p += 128
             signed_msg = to_b(payload[p:])
@@ -264,12 +267,13 @@ class MQTTClient:
             seq_no_hex = payload[p:p + 8]; p += 8
             msg = payload[p:]
 
-
+            # Convert src pub hex into valid ECDSA pub key for verifying sig.
             vk = VerifyingKey.from_string(
                 h_to_b(src_pk_hex),
                 curve=SECP256k1
             )
 
+            # Verify src pks signature is correct across signed msg.
             is_valid_sig = vk.verify(
                 sig,
                 signed_msg,
@@ -280,6 +284,8 @@ class MQTTClient:
                 print("invalid sig for ", msg)
                 return
             
+            # The message we wish to send still has app-specific type.
+            # Allows it to be "ack" or "msg" to avoid endless loop.
             msg_type = h_to_b(msg[:2])[0]
             msg = msg[2:]
             print("msg type = ", msg_type)
@@ -300,19 +306,28 @@ class MQTTClient:
             # Handle ACK response.
             if MsgEnum.MSGACK == msg_type:
                 print("got msg ack")
+
+                # Message doesn't belong to any registered plugins.
                 if plugin_id_hex not in self.msg_queues:
                     print("msg ack: in valid plugin id")
                     return
                 
+                # Seq no overflows message queue.
                 seq_no = int(seq_no_hex, 16)
                 if seq_no > len(self.msg_queues[plugin_id_hex]):
                     print("msg ack seq no invalid")
                     return
                 
+                # Load meta data for msg waiting for ack.
                 msg_meta = self.msg_queues[plugin_id_hex][seq_no]
                 if msg_meta["acked"].done():
                     return
                 
+                # Only the dest for a message should be able to ACK it.
+                if msg_meta["dest_pk_hex"] != src_pk_hex:
+                    return
+                
+                # Ack a message being sent to a host.
                 msg_meta["acked"].set_result(True)
                 return
 
