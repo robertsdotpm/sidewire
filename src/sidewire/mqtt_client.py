@@ -285,7 +285,7 @@ class MQTTClient:
             print("msg type = ", msg_type)
 
             # If a regular message is received then send an ACK back to owner.
-            if MsgEnum.MSG:
+            if MsgEnum.MSG == msg_type:
                 print("sending back ack to src")
                 await self.send(
                     "ack",
