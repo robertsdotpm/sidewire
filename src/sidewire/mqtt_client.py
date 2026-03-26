@@ -71,14 +71,52 @@ class MQTTClient:
             MQTTEnum.PUBACK: {},
         }
 
-        # Plugin message system [plugin id] -> list[{msg meta}] queue
-        self.msg_queues = {} 
+        # Plugin message system [enum][plugin id] = list[{msg meta}] queue
+        self.msg_queues = {
+            MsgEnum.MSG: {},
+            MsgEnum.MSGACK: {},
+        } 
 
         # Saved task reference for sending pings to server.
         self.keep_alive_task = None
 
+        # Dispatcher task.
+        self.dispatcher_task = asyncio.create_task(
+            async_wrap_errors(
+                self.dispatcher()
+            )
+        )
+
     def __await__(self):
         return self.connect().__await__()
+    
+    async def dispatcher(self, attempts=3, interval=60):
+        while 1:
+            for msg_type in self.msg_queues:
+                for plugin_id_hex in self.msg_queues[msg_type]:
+                    for meta in self.msg_queues[msg_type][plugin_id_hex]:
+                        # Already acked -- try next in line.
+                        if meta["acked"].done():
+                            continue
+
+                        # Don't rebroadcast if too soon.
+                        elapsed = int(time.time()) - meta["updated"]
+                        if elapsed < interval:
+                            break
+
+                        # Give up on acking this line of messages if too many past.
+                        if meta["attempts"] >= attempts:
+                            break
+
+                        # Increase state counters.
+                        meta["attempts"] += 1
+                        meta["updated"] = int(time.time())
+
+                        # Broadcast new message.
+                        print("dispatching ", meta)
+                        await self.publish(meta["dest_pk_hex"], meta["out"])
+
+            await asyncio.sleep(1)
     
     async def connect(self):
         pipe = await handle_connect(

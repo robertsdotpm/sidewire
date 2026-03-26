@@ -14,14 +14,13 @@ async def ordered_send(client, msg, dest_pk_hex, plugin_id_hex, msg_type=MsgEnum
     msg = to_h(bytes([msg_type])) + msg
 
     # Create queue per plugin ID.
-    if msg_type == MsgEnum.MSG:
-        if plugin_id_hex not in client.msg_queues:
-            client.msg_queues[plugin_id_hex] = []
+    if plugin_id_hex not in client.msg_queues[msg_type]:
+        client.msg_queues[msg_type][plugin_id_hex] = []
 
     # Get seq no
     print("seq no =", seq_no)
     if seq_no is None:
-        seq_no = len(client.msg_queues[plugin_id_hex])
+        seq_no = len(client.msg_queues[msg_type][plugin_id_hex])
     seq_no_hex = "{:08x}".format(seq_no)
 
     # Signed message section.
@@ -44,17 +43,18 @@ async def ordered_send(client, msg, dest_pk_hex, plugin_id_hex, msg_type=MsgEnum
 
     # Queue message.
     ack_future = asyncio.Future()
-    if msg_type == MsgEnum.MSG:
-        client.msg_queues[plugin_id_hex].append({
-            "attempts": 0,
-            "dest_pk_hex": dest_pk_hex,
-            "seq_no": seq_no,
-            "out": out,
-            "acked": ack_future
-        })
+    client.msg_queues[msg_type][plugin_id_hex].append({
+        "attempts": 0,
+        "dest_pk_hex": dest_pk_hex,
+        "seq_no": seq_no,
+        "out": out,
+        "acked": ack_future,
+        "updated": 0
+    })
     
     # Publish the message as intended.
-    await client.publish(dest_pk_hex, out)
+    #if msg_type == MsgEnum.MSGACK:
+    #    await client.publish(dest_pk_hex, out)
 
     # Caller can await ack if they want.
     return ack_future

@@ -108,18 +108,20 @@ async def handle_mqtt_packet(client, packet):
             print("got msg ack")
 
             # Message doesn't belong to any registered plugins.
-            if plugin_id_hex not in client.msg_queues:
+            if plugin_id_hex not in client.msg_queues[MsgEnum.MSG]:
                 print("msg ack: in valid plugin id")
                 return
             
+            msg_queue = client.msg_queues[MsgEnum.MSG][plugin_id_hex]
+            
             # Seq no overflows message queue.
             seq_no = int(seq_no_hex, 16)
-            if seq_no > len(client.msg_queues[plugin_id_hex]):
+            if seq_no > len(msg_queue):
                 print("msg ack seq no invalid")
                 return
             
             # Load meta data for msg waiting for ack.
-            msg_meta = client.msg_queues[plugin_id_hex][seq_no]
+            msg_meta = msg_queue[seq_no]
             if msg_meta["acked"].done():
                 return
             
