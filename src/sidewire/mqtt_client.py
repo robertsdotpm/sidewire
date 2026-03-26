@@ -45,9 +45,6 @@ MQTT_KEEP_ALIVE = 60
 
 class MQTTClient:
     def __init__(self, af, nic, dest, kp):
-        # Topics subscribed to -- designed to only be the pub key hex.
-        self.subscriptions = set()
-
         # Addressing info for connected MQTT server.
         self.af = af
         self.nic = nic
@@ -60,9 +57,6 @@ class MQTTClient:
 
         # ECDSA key pair for signing high-level sequenced messages over MQTT.
         self.kp = kp 
-
-        # Protocol-specific used for the session.
-        self.client_id = rand_plain(15)
 
         # Low level
         # [packet enum][packet id] = future
@@ -122,8 +116,31 @@ class MQTTClient:
             if (counter % (keep_alive + 1)) == keep_alive:
                 buf = self.mqtt_keep_alive()
                 await self.pipe.send(buf)
+
+            # Pipe down -- reconnect loop.
+            if self.pipe.on_close.is_set():
+                print("Got con lost event")
+                while 1:
+                    # Close old handle.
+                    if self.pipe:
+                        await self.pipe.close(force=True)
+
+                    # Connect a new one.
+                    try:
+                        pipe = await self.connect()
+                        if pipe:
+                            break
+                    except (asyncio.TimeoutError, ConnectionError, OSError):
+                        # Server still down.
+                        pass
+
+                    await asyncio.sleep(60)
+
     
     async def connect(self):
+        # Protocol-specific used for the session.
+        self.client_id = rand_plain(15)
+
         pipe = await handle_connect(
             self,
             self.af,
@@ -150,6 +167,8 @@ class MQTTClient:
         assert(len(pub_hex) == 66)
         await self.subscribe(pub_hex)
 
+        return pipe
+
     def mqtt_keep_alive(self):
         req = MQTTPacket(MQTTEnum.PINGREQ)
         return req.build()
@@ -157,10 +176,6 @@ class MQTTClient:
     async def subscribe(self, topic, timeout=4):
         assert(type(topic) == str)
 
-        # Already subscribed.
-        if topic in self.subscriptions:
-            return
-        
         # Call function to send a subscribe packet.
         packet_id, packet_ack = packet_ack_future(self.packet_ids, MQTTEnum.SUBACK)
         await handle_subscribe(self, topic, packet_id)
@@ -173,10 +188,6 @@ class MQTTClient:
             print("got return code = ", code)
             if code != 1: # QoS 1
                 raise Exception("Invalid sub ack code " + str(code))
-
-        # Record subscription success.
-        print("acked subscribe.")
-        self.subscriptions.add(topic)
 
     def publish(self, topic, payload):
         assert(is_ascii(topic))
@@ -196,14 +207,32 @@ class MQTTClient:
         )
 
 async def workspace():
-        #m = MQTTClient(IP4, nic, node_id, ("test.mosquitto.org", 1883))
+    #m = MQTTClient(IP4, nic, node_id, ("test.mosquitto.org", 1883))
     nic = Interface("default")
+
+    #pipe = await Pipe(TCP, ("example.com", 8123), nic.route(IP4)).connect()
+    #print(pipe)
+    #return
+
+    """
+    pipe = await Pipe(TCP, ("example.com", 80), nic.route(IP4)).connect()
+    pipe.sock.shutdown(socket.SHUT_RDWR)
+    pipe.sock.close()   
+    print(pipe.sock)
+
+    ret = await pipe.send(b"test")
+    # 0 on con lost
+    print(ret)
+    return
+    """
+    
 
     # Connect Alice client.
     alice_kp = Signing.keypair()
     alice_plugin_id = hashlib.sha256(b"alice plugin").hexdigest()
     alice_client = MQTTClient(IP4, nic, ("ovh1.p2pd.net", 1883), alice_kp)
     await alice_client.connect()
+    alice_client.pipe.sock.close()
 
     # Connect Bob client.
     bob_kp = Signing.keypair()

@@ -44,9 +44,6 @@ async def handle_mqtt_packet(client, packet):
             return
         
         topic, payload, packet_id = out
-        if topic not in client.subscriptions:
-            print("topic not in subscriptions.")
-            return
         
         # Sanity checks match client formats.
         assert(is_ascii(topic))
