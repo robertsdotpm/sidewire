@@ -77,9 +77,6 @@ class MQTTClient:
             MsgEnum.MSGACK: {},
         } 
 
-        # Saved task reference for sending pings to server.
-        self.keep_alive_task = None
-
         # Dispatcher task.
         self.dispatcher_task = asyncio.create_task(
             async_wrap_errors(
@@ -90,7 +87,8 @@ class MQTTClient:
     def __await__(self):
         return self.connect().__await__()
     
-    async def dispatcher(self, attempts=3, interval=60):
+    async def dispatcher(self, attempts=3, interval=60, keep_alive=int(MQTT_KEEP_ALIVE / 2)):
+        counter = 0
         while 1:
             for msg_type in self.msg_queues:
                 for plugin_id_hex in self.msg_queues[msg_type]:
@@ -114,9 +112,16 @@ class MQTTClient:
 
                         # Broadcast new message.
                         print("dispatching ", meta)
-                        await self.publish(meta["dest_pk_hex"], meta["out"])
+                        buf = self.publish(meta["dest_pk_hex"], meta["out"])
+                        await self.pipe.send(buf)
 
             await asyncio.sleep(1)
+            counter += 1 % 0xFFFFFFFFFF
+
+            # Send ping to server every so often.
+            if (counter % (keep_alive + 1)) == keep_alive:
+                buf = self.mqtt_keep_alive()
+                await self.pipe.send(buf)
     
     async def connect(self):
         pipe = await handle_connect(
@@ -145,16 +150,9 @@ class MQTTClient:
         assert(len(pub_hex) == 66)
         await self.subscribe(pub_hex)
 
-        # Periodically send ping requests to server.
-        keep_alive = int(MQTT_KEEP_ALIVE / 2)
-        self.keep_alive_task = asyncio.create_task(
-            repeat_every(keep_alive, self.mqtt_keep_alive)
-        )
-
-    async def mqtt_keep_alive(self):
+    def mqtt_keep_alive(self):
         req = MQTTPacket(MQTTEnum.PINGREQ)
-        buf = req.build()
-        await self.pipe.send(buf)
+        return req.build()
 
     async def subscribe(self, topic, timeout=4):
         assert(type(topic) == str)
@@ -180,15 +178,15 @@ class MQTTClient:
         print("acked subscribe.")
         self.subscriptions.add(topic)
 
-    async def publish(self, topic, payload):
+    def publish(self, topic, payload):
         assert(is_ascii(topic))
         assert(is_ascii(payload))
         packet_id, packet_ack = packet_ack_future(self.packet_ids, MQTTEnum.PUBACK)
-        await handle_publish(self, topic, payload, packet_id)
-        return packet_ack
+        buf = handle_publish(self, topic, payload, packet_id)
+        return buf
     
-    async def send(self, msg, dest_pk_hex, plugin_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
-        return await ordered_send(
+    def send(self, msg, dest_pk_hex, plugin_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
+        return ordered_send(
             self,
             msg,
             dest_pk_hex,
@@ -214,7 +212,7 @@ async def workspace():
     await bob_client.connect()
 
     # Send a message from alice to bob.
-    bob_ack_msg = await alice_client.send(
+    bob_ack_msg = alice_client.send(
         "hello bob -- with ordering and ack", 
         # Destination channel is Bob's public key hex.
         to_hs(bob_kp.compact_public_key),

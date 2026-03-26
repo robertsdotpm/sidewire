@@ -93,7 +93,7 @@ async def handle_mqtt_packet(client, packet):
         # If a regular message is received then send an ACK back to owner.
         if MsgEnum.MSG == msg_type:
             print("sending back ack to src")
-            await client.send(
+            client.send(
                 "ack",
                 src_pk_hex,
                 plugin_id_hex,
@@ -220,7 +220,7 @@ async def handle_subscribe(client, topic, packet_id):
     await client.pipe.send(pkt)
     print("sub pkt = ", pkt)
 
-async def handle_publish(client, topic, payload, packet_id):
+def handle_publish(client, topic, payload, packet_id):
     # Build variable header:
     # Topic (UTF-8 length-prefixed) + Packet Identifier (2 bytes)
     topic_bytes = mqtt_enc_str(topic)
@@ -229,5 +229,4 @@ async def handle_publish(client, topic, payload, packet_id):
     # Fixed header:
     # 0x32 = PUBLISH with QoS 1 (bits 1-2 set to 01)
     pkt = b"\x32" + mqtt_encode_varint(len(pl)) + pl
-
-    await client.pipe.send(pkt)
+    return pkt
