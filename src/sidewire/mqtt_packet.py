@@ -1,44 +1,8 @@
 import struct
 from enum import IntEnum
 from aionetiface import *
-
-def mqtt_enc_str(s):
-    b = to_b(s)
-    return struct.pack("!H", len(b)) + b
-
-def mqtt_encode_varint(value):
-    encoded = bytearray()
-    while True:
-        byte = value % 128
-        value //= 128
-        if value > 0:
-            byte |= 0x80
-        encoded.append(byte)
-        if value == 0:
-            break
-        
-    return bytes(encoded)
-
-def mqtt_decode_varint(buf, offset):
-    multiplier = 1
-    value = 0
-    consumed = 0
-
-    for i in range(4):  # max 4 bytes
-        if offset + i >= len(buf):
-            return None, None
-
-        byte = buf[offset + i]
-        consumed += 1
-
-        value += (byte & 0x7F) * multiplier
-
-        if (byte & 0x80) == 0:
-            return value, consumed
-
-        multiplier *= 128
-
-    raise ValueError("Malformed Remaining Length")
+from .mqtt_defs import *
+from .utils import *
 
 def mqtt_build_header(remaining_length, packet_type, flags):
     packet_type_part = int(packet_type) << 4
@@ -48,22 +12,6 @@ def mqtt_build_header(remaining_length, packet_type, flags):
         bytes([first_byte]) +
         mqtt_encode_varint(remaining_length)
     )
-
-class MQTTEnum(IntEnum):
-    CONNECT = 1
-    CONNACK = 2
-    PUBLISH = 3
-    PUBACK = 4
-    PUBREC = 5
-    PUBREL = 6
-    PUBCOMP = 7
-    SUBSCRIBE = 8
-    SUBACK = 9
-    UNSUBSCRIBE = 10
-    UNSUBACK = 11
-    PINGREQ = 12
-    PINGRESP = 13
-    DISCONNECT = 14
 
 class MQTTPacket:
     def __init__(self, packet_type, flags=0):

@@ -31,25 +31,16 @@ topic (33 their pub key)
 do mqtt packet ides first then do the app level ack stuff
 """
 
-
 import hashlib
 import asyncio
-from enum import IntEnum
 from aionetiface import *
+from .mqtt_defs import *
 from .utils import *
 from .signing import *
 from .mqtt_packet import *
+from .mqtt_proto import *
 
 MQTT_KEEP_ALIVE = 60
-
-class MsgEnum(IntEnum):
-    MSG = 1
-    MSGACK = 2
-
-class ProtoEvent:
-    def __init__(self, event_type, params):
-        self.process = event_type
-        self.params = params
 
 class MQTTClient:
     def __init__(self, af, nic, dest, kp):
@@ -95,7 +86,11 @@ class MQTTClient:
         
         # Start processing responses async from server.
         self.pipe = pipe
-        pipe.add_msg_cb(self.mqtt_packet_reader)
+
+        async def handle_chunks_async(chunk, client_tup, pipe):
+            return await mqtt_packet_reader(self, chunk, client_tup, pipe)
+
+        pipe.add_msg_cb(handle_chunks_async)
 
         # Subscribe to messages to our own public key.
         pub_hex = to_hs(self.kp.compact_public_key)
@@ -116,7 +111,7 @@ class MQTTClient:
             return
         
         # Call function to send a subscribe packet.
-        packet_id, packet_ack = self.packet_ack_future(MQTTEnum.SUBACK)
+        packet_id, packet_ack = packet_ack_future(self.packet_ids, MQTTEnum.SUBACK)
         await handle_subscribe(self, topic, packet_id)
 
         # Wait for acknowledgement from server.
@@ -185,240 +180,21 @@ class MQTTClient:
         # Caller can await ack if they want.
         return ack_future
 
-    def get_unique_packet_id(self, packet_type):
-        for _ in range(0, 10000):
-            packet_id = rand_b(2)
-            if packet_id not in self.packet_ids[packet_type]:
-                return packet_id
-            
-        raise Exception("Could not get unique packet id")
-    
-    def packet_ack_future(self, packet_type):
-        packet_id = self.get_unique_packet_id(packet_type)
-        packet_ack = asyncio.Future()
-        self.packet_ids[packet_type][packet_id] = packet_ack
-        return packet_id, packet_ack
-
     async def publish(self, topic, payload):
         assert(is_ascii(topic))
         assert(is_ascii(payload))
-        packet_id, packet_ack = self.packet_ack_future(MQTTEnum.PUBACK)
+        packet_id, packet_ack = packet_ack_future(self.packet_ids, MQTTEnum.PUBACK)
         await handle_publish(self, topic, payload, packet_id)
         return packet_ack
-
-    async def handle_mqtt_packet(self, packet):
-        #packet.debug_print()
-
-        #print("in handle mqtt pack")
-
-        # Main packets to 
-        for packet_type in (MQTTEnum.PUBACK, MQTTEnum.SUBACK):
-            if packet_type == packet.type:
-                #print("got mqtt ack")
-                #print("puback var header = ", packet.body)
-                #print("len body = ", len(packet.body))
-
-                #assert(len(packet.body) == 2)
-                # Strip packet_id from variable header.
-                packet_id = packet.body[:2]
-                if packet_id not in self.packet_ids[packet_type]:
-                    return
-
-                # Future to signal ack received for certain packets.
-                ack_future = self.packet_ids[packet_type][packet_id]
-                if ack_future.done():
-                    return
-                
-                # Sets the return code only for SUBACK otherwise empty str.
-                ack_future.set_result(packet.body[2:])
-                #print("ack packet id", packet_id)
-
-        # Handle receive channel message.
-        if MQTTEnum.PUBLISH == packet.type:
-            print("got mqtt publish")
-            out = mqtt_parse_publish(packet)
-            print(out)
-
-            if not out:
-                print("invalid publish packet")
-                return
-            
-            topic, payload, packet_id = out
-            if topic not in self.subscriptions:
-                print("topic not in subscriptions.")
-                return
-            
-            # Sanity checks match client formats.
-            assert(is_ascii(topic))
-            assert(is_ascii(payload))
-            
-            # Only interested in messages for our pub key.
-            compact_public_key = h_to_b(topic)
-            if compact_public_key != self.kp.compact_public_key:
-                print("Recv msg not meant for us.")
-
-            print("payload = ", payload)
-
-            # Unpack fields from payload.
-            src_pk_hex = payload[:66]; p = 66
-            sig = h_to_b(payload[p:p + 128]); p += 128
-            signed_msg = to_b(payload[p:])
-            plugin_id_hex = payload[p:p + 64]; p += 64
-            seq_no_hex = payload[p:p + 8]; p += 8
-            msg = payload[p:]
-
-            # Convert src pub hex into valid ECDSA pub key for verifying sig.
-            vk = VerifyingKey.from_string(
-                h_to_b(src_pk_hex),
-                curve=SECP256k1
-            )
-
-            # Verify src pks signature is correct across signed msg.
-            is_valid_sig = vk.verify(
-                sig,
-                signed_msg,
-                sigdecode=util.sigdecode_string
-            )
-
-            if not is_valid_sig:
-                print("invalid sig for ", msg)
-                return
-            
-            # The message we wish to send still has app-specific type.
-            # Allows it to be "ack" or "msg" to avoid endless loop.
-            msg_type = h_to_b(msg[:2])[0]
-            msg = msg[2:]
-            print("msg type = ", msg_type)
-
-            # If a regular message is received then send an ACK back to owner.
-            if MsgEnum.MSG == msg_type:
-                print("sending back ack to src")
-                await self.send(
-                    "ack",
-                    src_pk_hex,
-                    plugin_id_hex,
-                    MsgEnum.MSGACK,
-                    seq_no=int(seq_no_hex, 16)
-                )
-                
-                return
-            
-            # Handle ACK response.
-            if MsgEnum.MSGACK == msg_type:
-                print("got msg ack")
-
-                # Message doesn't belong to any registered plugins.
-                if plugin_id_hex not in self.msg_queues:
-                    print("msg ack: in valid plugin id")
-                    return
-                
-                # Seq no overflows message queue.
-                seq_no = int(seq_no_hex, 16)
-                if seq_no > len(self.msg_queues[plugin_id_hex]):
-                    print("msg ack seq no invalid")
-                    return
-                
-                # Load meta data for msg waiting for ack.
-                msg_meta = self.msg_queues[plugin_id_hex][seq_no]
-                if msg_meta["acked"].done():
-                    return
-                
-                # Only the dest for a message should be able to ACK it.
-                if msg_meta["dest_pk_hex"] != src_pk_hex:
-                    return
-                
-                # Ack a message being sent to a host.
-                msg_meta["acked"].set_result(True)
-                return
-
-            print("signed message for us = ", msg)
-
-            #print("Got message at ", topic, " content = ", payload)
-
-        # Handle ping from server.
-        if MQTTEnum.PINGRESP == packet.type:
-            #print("got ping response.")
-            return
     
     async def mqtt_keep_alive(self):
         req = MQTTPacket(MQTTEnum.PINGREQ)
         buf = req.build()
         await self.pipe.send(buf)
 
-    # TCP streaming protocol handler for MQTT.
-    async def mqtt_packet_reader(self, chunk, client_tup, pipe):
-        #print("got chunk = ", chunk)
-        if not chunk:
-            #print("not chunk")
-            return
-
-        # append incoming data
-        self.buf += chunk
-
-        # process as many complete packets as possible
-        while self.buf:
-            # need at least fixed header + 1 byte of remaining length
-            if len(self.buf) < 2:
-                print("need at least fixed header", self.buf)
-                return
-
-            # decode remaining length (starts at byte 1)
-            rem_len, consumed = mqtt_decode_varint(self.buf, 1)
-            if rem_len is None:
-                print("rem len is none", self.buf)
-                return
-
-            # total packet size = fixed header (1) + varint + payload
-            total_len = 1 + consumed + rem_len
-
-            # wait for full packet
-            if len(self.buf) < total_len:
-                print("wait for full packet", self.buf)
-                return
-
-            # extract packet
-            pkt_buf = self.buf[:total_len]
-            self.buf = self.buf[total_len:]
-
-            #print("pkt buf = ", pkt_buf)
-
-            # parse + handle
-            pkt = mqtt_parse_packet(pkt_buf)
-            await async_wrap_errors(
-                self.handle_mqtt_packet(pkt)
-            )
-
-async def load_signal_pipes(af, nic, seed_str, n, filter_list=[]):
-    # Monitor incorrectly lists TCP servers under UDP.
-    # Todo: fix this.
-    # TODO: this itself is random so this is not working as expected
-    servers = get_infra(af, UDP, "MQTT", sample=0)
-    servers = [(s[0]["fqns"][0], s[0]["port"]) for s in servers if len(s[0]["fqns"])]
-    mqtt_iter = seed_iter(servers, "test") # TODO
-
-    def select_servers(n, kv):
-        return [next(mqtt_iter) for x in range(0, n) if x not in filter_list]
-
-    c = ObjCollection(
-        lambda kparams, dest=None: MQTTClient(**kparams, dest=dest),
-        select_servers=select_servers
-    )
-
-    out = await c.get_n(n, kv={
-            "factory": {
-                "af": af,
-                "nic": nic,
-                "node_id": seed_str,
-            }
-        }
-    )
-
-    return out
-
 async def workspace():
         #m = MQTTClient(IP4, nic, node_id, ("test.mosquitto.org", 1883))
     nic = Interface("default")
-
 
     # Connect Alice client.
     alice_kp = Signing.keypair()
