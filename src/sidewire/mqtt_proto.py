@@ -6,7 +6,7 @@ from .utils import *
 from .signing import *
 from .mqtt_packet import *
 
-async def handle_mqtt_packet(self, packet):
+async def handle_mqtt_packet(client, packet):
     #packet.debug_print()
 
     #print("in handle mqtt pack")
@@ -21,11 +21,11 @@ async def handle_mqtt_packet(self, packet):
             #assert(len(packet.body) == 2)
             # Strip packet_id from variable header.
             packet_id = packet.body[:2]
-            if packet_id not in self.packet_ids[packet_type]:
+            if packet_id not in client.packet_ids[packet_type]:
                 return
 
             # Future to signal ack received for certain packets.
-            ack_future = self.packet_ids[packet_type][packet_id]
+            ack_future = client.packet_ids[packet_type][packet_id]
             if ack_future.done():
                 return
             
@@ -44,7 +44,7 @@ async def handle_mqtt_packet(self, packet):
             return
         
         topic, payload, packet_id = out
-        if topic not in self.subscriptions:
+        if topic not in client.subscriptions:
             print("topic not in subscriptions.")
             return
         
@@ -54,7 +54,7 @@ async def handle_mqtt_packet(self, packet):
         
         # Only interested in messages for our pub key.
         compact_public_key = h_to_b(topic)
-        if compact_public_key != self.kp.compact_public_key:
+        if compact_public_key != client.kp.compact_public_key:
             print("Recv msg not meant for us.")
 
         print("payload = ", payload)
@@ -93,7 +93,7 @@ async def handle_mqtt_packet(self, packet):
         # If a regular message is received then send an ACK back to owner.
         if MsgEnum.MSG == msg_type:
             print("sending back ack to src")
-            await self.send(
+            await client.send(
                 "ack",
                 src_pk_hex,
                 plugin_id_hex,
@@ -108,18 +108,18 @@ async def handle_mqtt_packet(self, packet):
             print("got msg ack")
 
             # Message doesn't belong to any registered plugins.
-            if plugin_id_hex not in self.msg_queues:
+            if plugin_id_hex not in client.msg_queues:
                 print("msg ack: in valid plugin id")
                 return
             
             # Seq no overflows message queue.
             seq_no = int(seq_no_hex, 16)
-            if seq_no > len(self.msg_queues[plugin_id_hex]):
+            if seq_no > len(client.msg_queues[plugin_id_hex]):
                 print("msg ack seq no invalid")
                 return
             
             # Load meta data for msg waiting for ack.
-            msg_meta = self.msg_queues[plugin_id_hex][seq_no]
+            msg_meta = client.msg_queues[plugin_id_hex][seq_no]
             if msg_meta["acked"].done():
                 return
             
@@ -141,49 +141,49 @@ async def handle_mqtt_packet(self, packet):
         return
     
 # TCP streaming protocol handler for MQTT.
-async def mqtt_packet_reader(self, chunk, client_tup, pipe):
+async def mqtt_packet_reader(client, chunk, client_tup, pipe):
     #print("got chunk = ", chunk)
     if not chunk:
         #print("not chunk")
         return
 
     # append incoming data
-    self.buf += chunk
+    client.buf += chunk
 
     # process as many complete packets as possible
-    while self.buf:
+    while client.buf:
         # need at least fixed header + 1 byte of remaining length
-        if len(self.buf) < 2:
-            print("need at least fixed header", self.buf)
+        if len(client.buf) < 2:
+            print("need at least fixed header", client.buf)
             return
 
         # decode remaining length (starts at byte 1)
-        rem_len, consumed = mqtt_decode_varint(self.buf, 1)
+        rem_len, consumed = mqtt_decode_varint(client.buf, 1)
         if rem_len is None:
-            print("rem len is none", self.buf)
+            print("rem len is none", client.buf)
             return
 
         # total packet size = fixed header (1) + varint + payload
         total_len = 1 + consumed + rem_len
 
         # wait for full packet
-        if len(self.buf) < total_len:
-            print("wait for full packet", self.buf)
+        if len(client.buf) < total_len:
+            print("wait for full packet", client.buf)
             return
 
         # extract packet
-        pkt_buf = self.buf[:total_len]
-        self.buf = self.buf[total_len:]
+        pkt_buf = client.buf[:total_len]
+        client.buf = client.buf[total_len:]
 
         #print("pkt buf = ", pkt_buf)
 
         # parse + handle
         pkt = mqtt_parse_packet(pkt_buf)
         await async_wrap_errors(
-            handle_mqtt_packet(self, pkt)
+            handle_mqtt_packet(client, pkt)
         )
 
-async def handle_connect(self, af, host, port, client_id, nic, keep_alive=60):
+async def handle_connect(client, af, host, port, client_id, nic, keep_alive=60):
     print("mqtt connect")
     route = nic.route(af)
     pipe = await Pipe(TCP, (host, port), route).connect()
@@ -211,14 +211,14 @@ async def handle_connect(self, af, host, port, client_id, nic, keep_alive=60):
     print("mqtt Connected success")
     return pipe
 
-async def handle_subscribe(self, topic, packet_id):
+async def handle_subscribe(client, topic, packet_id):
     vh = packet_id
     pl = mqtt_enc_str(topic) + b"\x01"  # QoS 1
     pkt = b"\x82" + mqtt_encode_varint(len(vh) + len(pl)) + vh + pl
-    await self.pipe.send(pkt)
+    await client.pipe.send(pkt)
     print("sub pkt = ", pkt)
 
-async def handle_publish(self, topic, payload, packet_id):
+async def handle_publish(client, topic, payload, packet_id):
     # Build variable header:
     # Topic (UTF-8 length-prefixed) + Packet Identifier (2 bytes)
     topic_bytes = mqtt_enc_str(topic)
@@ -228,4 +228,4 @@ async def handle_publish(self, topic, payload, packet_id):
     # 0x32 = PUBLISH with QoS 1 (bits 1-2 set to 01)
     pkt = b"\x32" + mqtt_encode_varint(len(pl)) + pl
 
-    await self.pipe.send(pkt)
+    await client.pipe.send(pkt)
