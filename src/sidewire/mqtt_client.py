@@ -45,20 +45,26 @@ MQTT_KEEP_ALIVE = 60
 
 class MQTTClient:
     def __init__(self, af, nic, dest, kp):
+        # Topics subscribed to -- designed to only be the pub key hex.
+        self.subscriptions = set()
+
+        # Addressing info for connected MQTT server.
         self.af = af
         self.nic = nic
         self.dest = dest
         self.host, self.port = dest
-        self.kp = kp # Key pair -- defines our
 
-
-
-        self.client_id = rand_plain(15)
+        # Active TCP con and buffered reader.
         self.pipe = None
         self.buf = b""
-        self.subscriptions = set()
-        self.keep_alive_task = None
 
+        # ECDSA key pair for signing high-level sequenced messages over MQTT.
+        self.kp = kp 
+
+        # Protocol-specific used for the session.
+        self.client_id = rand_plain(15)
+
+        # Low level
         # [packet enum][packet id] = future
         self.packet_ids = {
             MQTTEnum.SUBACK: {},
@@ -67,6 +73,9 @@ class MQTTClient:
 
         # Plugin message system [plugin id] -> list[{msg meta}] queue
         self.msg_queues = {} 
+
+        # Saved task reference for sending pings to server.
+        self.keep_alive_task = None
 
     def __await__(self):
         return self.connect().__await__()
