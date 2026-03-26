@@ -118,6 +118,7 @@ class MQTTClient:
                 await self.pipe.send(buf)
 
             # Pipe down -- reconnect loop.
+            # Pipe.send on broken con ends up calling connection_lost to set on_close
             if self.pipe.on_close.is_set():
                 print("Got con lost event")
                 while 1:
@@ -135,24 +136,30 @@ class MQTTClient:
                         pass
 
                     await asyncio.sleep(60)
-
     
     async def connect(self):
         # Protocol-specific used for the session.
         self.client_id = rand_plain(15)
+        route = self.nic.route(self.af)
+        pipe = await Pipe(TCP, (self.host, self.port), route).connect()
 
-        pipe = await handle_connect(
-            self,
-            self.af,
-            self.host,
-            self.port,
+        buf = build_connect(
             self.client_id,
-            self.nic,
             keep_alive=MQTT_KEEP_ALIVE
         )
 
+        await pipe.send(buf)
+
         if not pipe:
             raise Exception("could not connect.")
+        
+        # CONNACK (fixed 4 bytes)
+        got = await asyncio.wait_for(pipe.recv_n(4), 4)
+        if got != b' \x02\x00\x00':
+            await pipe.close()
+            raise BadProtoResp("Invalid CON ACK")
+        
+        print("mqtt Connected success")
         
         # Start processing responses async from server.
         self.pipe = pipe
@@ -165,23 +172,13 @@ class MQTTClient:
         # Subscribe to messages to our own public key.
         pub_hex = to_hs(self.kp.compact_public_key)
         assert(len(pub_hex) == 66)
-        await self.subscribe(pub_hex)
 
-        return pipe
-
-    def mqtt_keep_alive(self):
-        req = MQTTPacket(MQTTEnum.PINGREQ)
-        return req.build()
-
-    async def subscribe(self, topic, timeout=4):
-        assert(type(topic) == str)
-
-        # Call function to send a subscribe packet.
-        packet_id, packet_ack = packet_ack_future(self.packet_ids, MQTTEnum.SUBACK)
-        await handle_subscribe(self, topic, packet_id)
+        # Subscribe to pub key hex.
+        buf, packet_ack = self.subscribe(pub_hex)
+        await pipe.send(buf)
 
         # Wait for acknowledgement from server.
-        return_codes = await asyncio.wait_for(packet_ack, timeout)
+        return_codes = await asyncio.wait_for(packet_ack, 4)
 
         # Only accept QoS 1 -- errors or downgrades = no.
         for _, code in enumerate(return_codes):
@@ -189,11 +186,23 @@ class MQTTClient:
             if code != 1: # QoS 1
                 raise Exception("Invalid sub ack code " + str(code))
 
+        return pipe
+
+    def mqtt_keep_alive(self):
+        req = MQTTPacket(MQTTEnum.PINGREQ)
+        return req.build()
+
+    def subscribe(self, topic, timeout=4):
+        assert(type(topic) == str)
+        packet_id, packet_ack = packet_ack_future(self.packet_ids, MQTTEnum.SUBACK)
+        buf = build_subscribe(topic, packet_id)
+        return buf, packet_ack
+
     def publish(self, topic, payload):
         assert(is_ascii(topic))
         assert(is_ascii(payload))
         packet_id, packet_ack = packet_ack_future(self.packet_ids, MQTTEnum.PUBACK)
-        buf = handle_publish(self, topic, payload, packet_id)
+        buf = build_publish(topic, payload, packet_id)
         return buf
     
     def send(self, msg, dest_pk_hex, plugin_id_hex, msg_type=MsgEnum.MSG, seq_no=None):

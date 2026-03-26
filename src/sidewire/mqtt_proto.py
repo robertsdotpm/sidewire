@@ -182,10 +182,8 @@ async def mqtt_packet_reader(client, chunk, client_tup, pipe):
             handle_mqtt_packet(client, pkt)
         )
 
-async def handle_connect(client, af, host, port, client_id, nic, keep_alive=60):
+def build_connect(client_id, keep_alive=60):
     print("mqtt connect")
-    route = nic.route(af)
-    pipe = await Pipe(TCP, (host, port), route).connect()
 
     # proto name, proto level, clean session, keep alive 60s
     vh = (
@@ -198,26 +196,16 @@ async def handle_connect(client, af, host, port, client_id, nic, keep_alive=60):
 
     # Full packet to send.
     pkt = b"\x10" + mqtt_encode_varint(len(vh) + len(pl)) + vh + pl
-    await pipe.send(pkt)
+    return pkt
 
-    # CONNACK (fixed 4 bytes)
-    got = await asyncio.wait_for(pipe.recv_n(4), 4)
-    if got != b' \x02\x00\x00':
-        await pipe.close()
-        raise BadProtoResp("Invalid CON ACK")
-    
-
-    print("mqtt Connected success")
-    return pipe
-
-async def handle_subscribe(client, topic, packet_id):
+def build_subscribe(topic, packet_id):
     vh = packet_id
     pl = mqtt_enc_str(topic) + b"\x01"  # QoS 1
     pkt = b"\x82" + mqtt_encode_varint(len(vh) + len(pl)) + vh + pl
-    await client.pipe.send(pkt)
+    return pkt
     print("sub pkt = ", pkt)
 
-def handle_publish(client, topic, payload, packet_id):
+def build_publish(topic, payload, packet_id):
     # Build variable header:
     # Topic (UTF-8 length-prefixed) + Packet Identifier (2 bytes)
     topic_bytes = mqtt_enc_str(topic)
