@@ -50,6 +50,7 @@ class MQTTClient:
         } 
 
         # Dispatcher task.
+        self.is_closed = asyncio.Event()
         self.dispatcher_task = asyncio.create_task(
             async_wrap_errors(
                 dispatcher(self, keep_alive=int(MQTT_KEEP_ALIVE / 2))
@@ -85,6 +86,17 @@ class MQTTClient:
             msg_type,
             seq_no
         )
+    
+    async def close(self):
+        if self.is_closed.is_set():
+            return
+        
+        self.is_closed.set()
+        if self.dispatcher_task:
+            self.dispatcher_task.cancel()
+
+        if self.pipe:
+            await self.pipe.close()
 
 async def workspace():
     #m = MQTTClient(IP4, nic, node_id, ("test.mosquitto.org", 1883))
@@ -132,6 +144,8 @@ async def workspace():
     await bob_ack_msg
     print("got ack from bob")
     await asyncio.sleep(4)
+    await alice_client.close()
+    await bob_client.close()
     return
 
 
