@@ -6,7 +6,7 @@ from ..signing import *
 from .mqtt_packet import *
 from .mqtt_proto import *
 
-def ordered_send(client, msg, dest_pk_hex, plugin_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
+def ordered_ack_send(client, msg, dest_pk_hex, plugin_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
     assert(len(plugin_id_hex) == 64)
     assert(len(dest_pk_hex) == 66)
 

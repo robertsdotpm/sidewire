@@ -2,19 +2,20 @@ import time
 import asyncio
 from aionetiface import *
 from .mqtt_connect import *
+from .mqtt_packet import *
 
 async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
+    counter = 0
     try:
-        counter = 0
-
         """
         Putting the reconnect loop at the start helps ensure that later code
         here that calls client.pipe.send succeeds, otherwise client.pipe is
         set to None and send won't exist yet.
+
+        Pipe.send on broken con ends up calling connection_lost
+        to set on_close for the pipe event.
         """
         while not client.is_closed.is_set():
-            # Pipe down -- reconnect loop.
-            # Pipe.send on broken con ends up calling connection_lost to set on_close
             if client.pipe is None or client.pipe.on_close.is_set():
                 print("Got con lost event")
                 while not client.is_closed.is_set():
@@ -61,6 +62,7 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
                             client.pipe.send(buf)
                         )
 
+            # Used to know when to send a ping.
             await asyncio.sleep(1)
             counter += 1 % 0xFFFFFFFFFF
 

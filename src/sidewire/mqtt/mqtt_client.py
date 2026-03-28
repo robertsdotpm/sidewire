@@ -15,7 +15,7 @@ from .utils import *
 from ..signing import *
 from .mqtt_packet import *
 from .mqtt_proto import *
-from .ordered_send import *
+from .mqtt_ordered_send import *
 from .mqtt_dispatch import *
 from .mqtt_connect import *
 
@@ -84,7 +84,7 @@ class MQTTClient:
         return buf, packet_ack
     
     def send(self, msg, dest_pk_hex, plugin_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
-        return ordered_send(
+        return ordered_ack_send(
             self,
             msg,
             dest_pk_hex,
