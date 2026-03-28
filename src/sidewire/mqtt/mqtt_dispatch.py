@@ -1,9 +1,32 @@
 import time
 import asyncio
+from aionetiface import *
+from .mqtt_connect import *
 
 async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
     counter = 0
     while 1:
+        # Pipe down -- reconnect loop.
+        # Pipe.send on broken con ends up calling connection_lost to set on_close
+        if client.pipe is None or client.pipe.on_close.is_set():
+            print("Got con lost event")
+            while 1:
+                # Close old handle.
+                if client.pipe:
+                    await client.pipe.close(force=True)
+
+                # Connect a new one.
+                try:
+                    pipe = await mqtt_connect(client, keep_alive)
+                    if pipe:
+                        break
+                except (asyncio.TimeoutError, ConnectionError, OSError):
+                    # Server still down.
+                    pass
+
+                await asyncio.sleep(60)
+
+        # Process messages.
         for msg_type in client.msg_queues:
             for plugin_id_hex in client.msg_queues[msg_type]:
                 for meta in client.msg_queues[msg_type][plugin_id_hex]:
@@ -27,7 +50,9 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
                     # Broadcast new message.
                     print("dispatching ", meta)
                     buf = client.publish(meta["dest_pk_hex"], meta["out"])
-                    await client.pipe.send(buf)
+                    await async_wrap_errors(
+                        client.pipe.send(buf)
+                    )
 
         await asyncio.sleep(1)
         counter += 1 % 0xFFFFFFFFFF
@@ -35,24 +60,4 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
         # Send ping to server every so often.
         if (counter % (keep_alive + 1)) == keep_alive:
             buf = client.mqtt_keep_alive()
-            await client.pipe.send(buf)
-
-        # Pipe down -- reconnect loop.
-        # Pipe.send on broken con ends up calling connection_lost to set on_close
-        if client.pipe.on_close.is_set():
-            print("Got con lost event")
-            while 1:
-                # Close old handle.
-                if client.pipe:
-                    await client.pipe.close(force=True)
-
-                # Connect a new one.
-                try:
-                    pipe = await client.connect()
-                    if pipe:
-                        break
-                except (asyncio.TimeoutError, ConnectionError, OSError):
-                    # Server still down.
-                    pass
-
-                await asyncio.sleep(60)
+            await async_wrap_errors(client.pipe.send(buf))
