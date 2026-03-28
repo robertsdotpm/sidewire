@@ -3,7 +3,7 @@ import asyncio
 from aionetiface import *
 from .mqtt_defs import *
 from .utils import *
-from .signing import *
+from ..signing import *
 from .mqtt_packet import *
 
 async def handle_mqtt_packet(client, packet):
