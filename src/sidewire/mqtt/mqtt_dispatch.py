@@ -6,6 +6,12 @@ from .mqtt_connect import *
 async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
     try:
         counter = 0
+
+        """
+        Putting the reconnect loop at the start helps ensure that later code
+        here that calls client.pipe.send succeeds, otherwise client.pipe is
+        set to None and send won't exist yet.
+        """
         while not client.is_closed.is_set():
             # Pipe down -- reconnect loop.
             # Pipe.send on broken con ends up calling connection_lost to set on_close
@@ -27,7 +33,7 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
 
                     await asyncio.sleep(60)
 
-            # Process messages.
+            # Process messages in various queues.
             for msg_type in client.msg_queues:
                 for plugin_id_hex in client.msg_queues[msg_type]:
                     for meta in client.msg_queues[msg_type][plugin_id_hex]:
@@ -64,3 +70,4 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
                 await async_wrap_errors(client.pipe.send(buf))
     except asyncio.CancelledError:
         print("dispatcher exited.")
+        # Cleanup handled by caller.

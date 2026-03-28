@@ -51,14 +51,24 @@ class MQTTClient:
 
         # Dispatcher task.
         self.is_closed = asyncio.Event()
-        self.dispatcher_task = asyncio.create_task(
-            async_wrap_errors(
-                dispatcher(self, keep_alive=int(MQTT_KEEP_ALIVE / 2))
-            )
-        )
+        self.dispatcher_task = None
 
     def __await__(self):
         return self.connect().__await__()
+    
+    async def connect(self):
+        pipe = await mqtt_connect(self, MQTT_KEEP_ALIVE)
+        if pipe:
+            """
+            As dispatcher also sets self.pipe for reconnect -- there is a race
+            condition between connect() and reconnect loop. Starting dispatcher
+            after connect solves that issue.
+            """
+            self.dispatcher_task = asyncio.create_task(
+                async_wrap_errors(
+                    dispatcher(self, keep_alive=int(MQTT_KEEP_ALIVE / 2))
+                )
+            )
 
     def mqtt_keep_alive(self):
         req = MQTTPacket(MQTTEnum.PINGREQ)
@@ -94,9 +104,11 @@ class MQTTClient:
         self.is_closed.set()
         if self.dispatcher_task:
             self.dispatcher_task.cancel()
+            self.dispatcher_task = None
 
         if self.pipe:
             await self.pipe.close()
+            self.pipe = None
 
 async def workspace():
     #m = MQTTClient(IP4, nic, node_id, ("test.mosquitto.org", 1883))
@@ -123,14 +135,14 @@ async def workspace():
     alice_kp = Signing.keypair()
     alice_plugin_id = hashlib.sha256(b"alice plugin").hexdigest()
     alice_client = MQTTClient(IP4, nic, ("ovh1.p2pd.net", 1883), alice_kp)
-    #await alice_client.connect()
-    #alice_client.pipe.sock.close()
+    await alice_client.connect()
+    alice_client.pipe.sock.close()
 
     # Connect Bob client.
     bob_kp = Signing.keypair()
     bob_plugin_id = hashlib.sha256(b"bob plugin").hexdigest()
     bob_client = MQTTClient(IP4, nic, ("ovh1.p2pd.net", 1883), bob_kp)
-    #await bob_client.connect()
+    await bob_client.connect()
 
     # Send a message from alice to bob.
     bob_ack_msg = alice_client.send(
