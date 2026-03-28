@@ -19,8 +19,6 @@ from .ordered_send import *
 from .mqtt_dispatch import *
 from .mqtt_connect import *
 
-MQTT_KEEP_ALIVE = 60
-
 class MQTTClient:
     def __init__(self, af, nic, dest, kp):
         # Addressing info for connected MQTT server.
@@ -70,9 +68,7 @@ class MQTTClient:
                 )
             )
 
-    def mqtt_keep_alive(self):
-        req = MQTTPacket(MQTTEnum.PINGREQ)
-        return req.build()
+        return pipe
 
     def subscribe(self, topic, timeout=4):
         assert(type(topic) == str)
@@ -85,7 +81,7 @@ class MQTTClient:
         assert(is_ascii(payload))
         packet_id, packet_ack = packet_ack_future(self.packet_ids, MQTTEnum.PUBACK)
         buf = build_publish(topic, payload, packet_id)
-        return buf
+        return buf, packet_ack
     
     def send(self, msg, dest_pk_hex, plugin_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
         return ordered_send(
@@ -145,7 +141,7 @@ async def workspace():
     await bob_client.connect()
 
     # Send a message from alice to bob.
-    bob_ack_msg = alice_client.send(
+    _, bob_ack_msg = alice_client.send(
         "hello bob -- with ordering and ack", 
         # Destination channel is Bob's public key hex.
         to_hs(bob_kp.compact_public_key),

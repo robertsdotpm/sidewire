@@ -1,5 +1,7 @@
 from enum import IntEnum
 
+MQTT_KEEP_ALIVE = 60
+
 class MsgEnum(IntEnum):
     MSG = 1
     MSGACK = 2

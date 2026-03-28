@@ -57,4 +57,4 @@ def ordered_send(client, msg, dest_pk_hex, plugin_id_hex, msg_type=MsgEnum.MSG, 
     #    await client.publish(dest_pk_hex, out)
 
     # Caller can await ack if they want.
-    return ack_future
+    return out, ack_future

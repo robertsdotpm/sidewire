@@ -56,7 +56,7 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
 
                         # Broadcast new message.
                         print("dispatching ", meta)
-                        buf = client.publish(meta["dest_pk_hex"], meta["out"])
+                        buf, _ = client.publish(meta["dest_pk_hex"], meta["out"])
                         await async_wrap_errors(
                             client.pipe.send(buf)
                         )
@@ -66,8 +66,11 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
 
             # Send ping to server every so often.
             if (counter % (keep_alive + 1)) == keep_alive:
-                buf = client.mqtt_keep_alive()
+                req = MQTTPacket(MQTTEnum.PINGREQ)
+                buf = req.build()
                 await async_wrap_errors(client.pipe.send(buf))
     except asyncio.CancelledError:
         print("dispatcher exited.")
         # Cleanup handled by caller.
+    except Exception:
+        log_exception()
