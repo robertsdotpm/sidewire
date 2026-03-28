@@ -1,34 +1,10 @@
 """
-design doesnt work. in the future messages will be received in any order
-async for different events and a list of waiting events needs to try
-match them.
-
-publishing side:
-    PUBACK (for QoS 1)
-
-    
-    DISCONNECT (optional but important)
-    TCP close/reset
-        everything should be resumable.
-
-
-msg queue ...
-    plugin id
-        await ack from actual dest before sending next
-        pop
-
-    can continue to next msg queued for next plugin before the other returns
-
-provides ordered guaranteed with signed ack to dest
-
-send(msg, dest_pub_key, plugin_id)
 
 topic (33 their pub key)
     in bytes -- double all for hex
     msg format: 33 our_pub_key, 64 sig over ( 32 plugin_id, 4 seq_no, msg )
     ^ allows ack back
 
-do mqtt packet ides first then do the app level ack stuff
 """
 
 import hashlib
@@ -40,6 +16,8 @@ from ..signing import *
 from .mqtt_packet import *
 from .mqtt_proto import *
 from .ordered_send import *
+from .mqtt_dispatch import *
+from .mqtt_connect import *
 
 MQTT_KEEP_ALIVE = 60
 
@@ -74,119 +52,15 @@ class MQTTClient:
         # Dispatcher task.
         self.dispatcher_task = asyncio.create_task(
             async_wrap_errors(
-                self.dispatcher()
+                dispatcher(self, keep_alive=int(MQTT_KEEP_ALIVE / 2))
             )
         )
 
     def __await__(self):
         return self.connect().__await__()
     
-    async def dispatcher(self, attempts=3, interval=60, keep_alive=int(MQTT_KEEP_ALIVE / 2)):
-        counter = 0
-        while 1:
-            for msg_type in self.msg_queues:
-                for plugin_id_hex in self.msg_queues[msg_type]:
-                    for meta in self.msg_queues[msg_type][plugin_id_hex]:
-                        # Already acked -- try next in line.
-                        if meta["acked"].done():
-                            continue
-
-                        # Don't rebroadcast if too soon.
-                        elapsed = int(time.time()) - meta["updated"]
-                        if elapsed < interval:
-                            break
-
-                        # Give up on acking this line of messages if too many past.
-                        if meta["attempts"] >= attempts:
-                            break
-
-                        # Increase state counters.
-                        meta["attempts"] += 1
-                        meta["updated"] = int(time.time())
-
-                        # Broadcast new message.
-                        print("dispatching ", meta)
-                        buf = self.publish(meta["dest_pk_hex"], meta["out"])
-                        await self.pipe.send(buf)
-
-            await asyncio.sleep(1)
-            counter += 1 % 0xFFFFFFFFFF
-
-            # Send ping to server every so often.
-            if (counter % (keep_alive + 1)) == keep_alive:
-                buf = self.mqtt_keep_alive()
-                await self.pipe.send(buf)
-
-            # Pipe down -- reconnect loop.
-            # Pipe.send on broken con ends up calling connection_lost to set on_close
-            if self.pipe.on_close.is_set():
-                print("Got con lost event")
-                while 1:
-                    # Close old handle.
-                    if self.pipe:
-                        await self.pipe.close(force=True)
-
-                    # Connect a new one.
-                    try:
-                        pipe = await self.connect()
-                        if pipe:
-                            break
-                    except (asyncio.TimeoutError, ConnectionError, OSError):
-                        # Server still down.
-                        pass
-
-                    await asyncio.sleep(60)
-    
     async def connect(self):
-        # Protocol-specific used for the session.
-        self.client_id = rand_plain(15)
-        route = self.nic.route(self.af)
-        pipe = await Pipe(TCP, (self.host, self.port), route).connect()
-
-        buf = build_connect(
-            self.client_id,
-            keep_alive=MQTT_KEEP_ALIVE
-        )
-
-        await pipe.send(buf)
-
-        if not pipe:
-            raise Exception("could not connect.")
-        
-        # CONNACK (fixed 4 bytes)
-        got = await asyncio.wait_for(pipe.recv_n(4), 4)
-        if got != b' \x02\x00\x00':
-            await pipe.close()
-            raise BadProtoResp("Invalid CON ACK")
-        
-        print("mqtt Connected success")
-        
-        # Start processing responses async from server.
-        self.pipe = pipe
-
-        async def handle_chunks_async(chunk, client_tup, pipe):
-            return await mqtt_packet_reader(self, chunk, client_tup, pipe)
-
-        pipe.add_msg_cb(handle_chunks_async)
-
-        # Subscribe to messages to our own public key.
-        pub_hex = to_hs(self.kp.compact_public_key)
-        assert(len(pub_hex) == 66)
-
-        # Subscribe to pub key hex.
-        buf, packet_ack = self.subscribe(pub_hex)
-        await pipe.send(buf)
-
-        # Wait for acknowledgement from server.
-        return_codes = await asyncio.wait_for(packet_ack, 4)
-
-        # Only accept QoS 1 -- errors or downgrades = no.
-        for _, code in enumerate(return_codes):
-            print("got return code = ", code)
-            if code != 1: # QoS 1
-                raise Exception("Invalid sub ack code " + str(code))
-
-        return pipe
+        return await mqtt_connect(self, MQTT_KEEP_ALIVE)
 
     def mqtt_keep_alive(self):
         req = MQTTPacket(MQTTEnum.PINGREQ)
