@@ -36,8 +36,8 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
 
             # Process messages in various queues.
             for msg_type in client.msg_queues:
-                for plugin_id_hex in client.msg_queues[msg_type]:
-                    for meta in client.msg_queues[msg_type][plugin_id_hex]:
+                for pipe_id_hex in client.msg_queues[msg_type]:
+                    for meta in client.msg_queues[msg_type][pipe_id_hex]:
                         # Already acked -- try next in line.
                         if meta["acked"].done():
                             continue

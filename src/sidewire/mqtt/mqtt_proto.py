@@ -60,7 +60,7 @@ async def handle_mqtt_packet(client, packet):
         src_pk_hex = payload[:66]; p = 66
         sig = h_to_b(payload[p:p + 128]); p += 128
         signed_msg = to_b(payload[p:])
-        plugin_id_hex = payload[p:p + 64]; p += 64
+        pipe_id_hex = payload[p:p + 64]; p += 64
         seq_no_hex = payload[p:p + 8]; p += 8
         msg = payload[p:]
 
@@ -90,10 +90,24 @@ async def handle_mqtt_packet(client, packet):
         # If a regular message is received then send an ACK back to owner.
         if MsgEnum.MSG == msg_type:
             print("sending back ack to src")
+
+            """
+            Pass received messages to any registered message handlers.
+            Do it before sending back an ack to avoid race conditions in
+            receiving more messages before processing in done.
+            """
+            for msg_handler in client.msg_handlers:
+                await msg_handler(
+                    msg,
+                    src_pk_hex,
+                    pipe_id_hex,
+                    client
+                )
+
             client.send(
                 "ack",
                 src_pk_hex,
-                plugin_id_hex,
+                pipe_id_hex,
                 MsgEnum.MSGACK,
                 seq_no=int(seq_no_hex, 16)
             )
@@ -104,12 +118,12 @@ async def handle_mqtt_packet(client, packet):
         if MsgEnum.MSGACK == msg_type:
             print("got msg ack")
 
-            # Message doesn't belong to any registered plugins.
-            if plugin_id_hex not in client.msg_queues[MsgEnum.MSG]:
-                print("msg ack: in valid plugin id")
+            # Message doesn't belong to any registered pipes.
+            if pipe_id_hex not in client.msg_queues[MsgEnum.MSG]:
+                print("msg ack: in valid pipe id")
                 return
             
-            msg_queue = client.msg_queues[MsgEnum.MSG][plugin_id_hex]
+            msg_queue = client.msg_queues[MsgEnum.MSG][pipe_id_hex]
             
             # Seq no overflows message queue.
             seq_no = int(seq_no_hex, 16)

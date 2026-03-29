@@ -6,25 +6,25 @@ from ..signing import *
 from .mqtt_packet import *
 from .mqtt_proto import *
 
-def ordered_ack_send(client, msg, dest_pk_hex, plugin_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
-    assert(len(plugin_id_hex) == 64)
+def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
+    assert(len(pipe_id_hex) == 64)
     assert(len(dest_pk_hex) == 66)
 
     # Prepend application-level header to message portion.
     msg = to_h(bytes([msg_type])) + msg
 
-    # Create queue per plugin ID.
-    if plugin_id_hex not in client.msg_queues[msg_type]:
-        client.msg_queues[msg_type][plugin_id_hex] = []
+    # Create queue per pipe ID.
+    if pipe_id_hex not in client.msg_queues[msg_type]:
+        client.msg_queues[msg_type][pipe_id_hex] = []
 
     # Get seq no
     print("seq no =", seq_no)
     if seq_no is None:
-        seq_no = len(client.msg_queues[msg_type][plugin_id_hex])
+        seq_no = len(client.msg_queues[msg_type][pipe_id_hex])
     seq_no_hex = "{:08x}".format(seq_no)
 
     # Signed message section.
-    signed_msg = plugin_id_hex + seq_no_hex + msg
+    signed_msg = pipe_id_hex + seq_no_hex + msg
     sig = client.kp.private_key.sign(
         to_b(signed_msg),
         sigencode=util.sigencode_string
@@ -43,7 +43,7 @@ def ordered_ack_send(client, msg, dest_pk_hex, plugin_id_hex, msg_type=MsgEnum.M
 
     # Queue message.
     ack_future = asyncio.Future()
-    client.msg_queues[msg_type][plugin_id_hex].append({
+    client.msg_queues[msg_type][pipe_id_hex].append({
         "attempts": 0,
         "dest_pk_hex": dest_pk_hex,
         "seq_no": seq_no,

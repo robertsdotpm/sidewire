@@ -2,7 +2,7 @@
 
 topic (33 their pub key)
     in bytes -- double all for hex
-    msg format: 33 our_pub_key, 64 sig over ( 32 plugin_id, 4 seq_no, msg )
+    msg format: 33 our_pub_key, 64 sig over ( 32 pipe_id, 4 seq_no, msg )
     ^ allows ack back
 
 """
@@ -41,11 +41,14 @@ class MQTTClient:
             MQTTEnum.PUBACK: {},
         }
 
-        # Plugin message system [enum][plugin id] = list[{msg meta}] queue
+        # Plugin message system [enum][pipe id] = list[{msg meta}] queue
         self.msg_queues = {
             MsgEnum.MSG: {},
             MsgEnum.MSGACK: {},
-        } 
+        }
+
+        # Handle received messages.
+        self.msg_handlers = []
 
         # Dispatcher task.
         self.is_closed = asyncio.Event()
@@ -53,6 +56,9 @@ class MQTTClient:
 
     def __await__(self):
         return self.connect().__await__()
+    
+    def add_msg_handler(self, msg_handler):
+        self.msg_handlers.append(msg_handler)
     
     async def connect(self):
         pipe = await mqtt_connect(self, MQTT_KEEP_ALIVE)
@@ -83,12 +89,12 @@ class MQTTClient:
         buf = build_publish(topic, payload, packet_id)
         return buf, packet_ack
     
-    def send(self, msg, dest_pk_hex, plugin_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
+    def send(self, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
         return ordered_ack_send(
             self,
             msg,
             dest_pk_hex,
-            plugin_id_hex,
+            pipe_id_hex,
             msg_type,
             seq_no
         )
@@ -126,18 +132,25 @@ async def workspace():
     return
     """
     
+    """
+    This will probably end up being a closure that has an embedded reference
+    back to the plugin manager.
+    """
+    async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+        print("msg handler got ", msg, " ", src_pk_hex, " ", pipe_id_hex)
 
     # Connect Alice client.
     alice_kp = Signing.keypair()
-    alice_plugin_id = hashlib.sha256(b"alice plugin").hexdigest()
+    alice_pipe_id = hashlib.sha256(b"alice pipe").hexdigest()
     alice_client = MQTTClient(IP4, nic, ("ovh1.p2pd.net", 1883), alice_kp)
     await alice_client.connect()
     alice_client.pipe.sock.close()
 
     # Connect Bob client.
     bob_kp = Signing.keypair()
-    bob_plugin_id = hashlib.sha256(b"bob plugin").hexdigest()
+    bob_pipe_id = hashlib.sha256(b"bob plugin").hexdigest()
     bob_client = MQTTClient(IP4, nic, ("ovh1.p2pd.net", 1883), bob_kp)
+    bob_client.add_msg_handler(msg_handler)
     await bob_client.connect()
 
     # Send a message from alice to bob.
@@ -145,7 +158,7 @@ async def workspace():
         "hello bob -- with ordering and ack", 
         # Destination channel is Bob's public key hex.
         to_hs(bob_kp.compact_public_key),
-        alice_plugin_id
+        alice_pipe_id
     )
     
     # Wait for alice to receive the message.
