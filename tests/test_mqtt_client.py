@@ -17,13 +17,15 @@ def get_mqtt_client(server=MQTT_SERVER):
     client = MQTTClient(af, nic, server, kp)
     return client
 
-async def mqtt_send_msg_and_handle(msg_list, msg_handler):
+async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, attempts=3, interval=2, keep_alive=30, timeout=5):
     # Create client and install a message handler.
     client = get_mqtt_client()
     client.add_msg_handler(msg_handler)
 
     # Connect client to server.
-    await client.connect()
+    await client.connect(attempts, interval, keep_alive)
+    if do_close:
+        client.pipe.sock.close()
 
     # Send a message.
     pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
@@ -35,7 +37,7 @@ async def mqtt_send_msg_and_handle(msg_list, msg_handler):
         )
 
         # Wait for recv msg.
-        await asyncio.wait_for(got_ack, 3)
+        await asyncio.wait_for(got_ack, timeout)
 
     # Cleanup.
     await client.close()
@@ -77,6 +79,17 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         await mqtt_send_msg_and_handle(msg_list, msg_handler)
         assert(recv_list == msg_list)
 
+    async def test_single_send_recv_disconnect(self):
+        buf = "msg to send"
+        got_msg = asyncio.Event()
+
+        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+            if msg == buf:
+                got_msg.set()
+
+        await mqtt_send_msg_and_handle([buf], msg_handler, do_close=True)
+        assert(got_msg.is_set())
+
             
     # test messages are only received once
 
@@ -84,10 +97,12 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 
     # Check other servers work
 
-    # Test disconnect rebroadcast
-        
+    # test retransmit works if other client disconnects (simulate it being down for a moment.)
 
+    # Check that ping is working.
 
+# TODO: handle disconnect message.
+# todo write docs at top of different files
 
 if __name__ == '__main__':
     main()

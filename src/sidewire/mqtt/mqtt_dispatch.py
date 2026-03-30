@@ -49,7 +49,7 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
                 for pipe_id_hex in client.msg_queues[msg_type]:
                     for seq_no in client.msg_queues[msg_type][pipe_id_hex]:
                         meta = client.msg_queues[msg_type][pipe_id_hex][seq_no]
-                        #print("d", msg_type, " ", meta)
+                        print("d", msg_type, " ", meta)
 
                         # Already acked -- try next in line.
                         if meta["acked"].done():

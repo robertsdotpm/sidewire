@@ -61,8 +61,8 @@ class MQTTClient:
     def add_msg_handler(self, msg_handler):
         self.msg_handlers.append(msg_handler)
     
-    async def connect(self):
-        pipe = await mqtt_connect(self, MQTT_KEEP_ALIVE)
+    async def connect(self, attempts=3, interval=60, keep_alive=MQTT_KEEP_ALIVE):
+        pipe = await mqtt_connect(self, keep_alive)
         if pipe:
             """
             As dispatcher also sets self.pipe for reconnect -- there is a race
@@ -71,7 +71,12 @@ class MQTTClient:
             """
             self.dispatcher_task = asyncio.create_task(
                 async_wrap_errors(
-                    dispatcher(self, keep_alive=int(MQTT_KEEP_ALIVE / 2))
+                    dispatcher(
+                        self,
+                        attempts=attempts,
+                        interval=interval,
+                        keep_alive=int(keep_alive / 2),
+                    )
                 )
             )
 
