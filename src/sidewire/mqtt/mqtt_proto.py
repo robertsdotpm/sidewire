@@ -92,32 +92,53 @@ async def handle_mqtt_packet(client, packet):
         # If a regular message is received then send an ACK back to owner.
         if MsgEnum.MSG == msg_type:
             print("sending back ack to src ", int(seq_no_hex, 16))
+            seq_no = int(seq_no_hex, 16)
 
+            """
+            If a message is sent back to us we may already have called
+            a func for the ack but they haven't received the ack.
+            Rather than wait for dispatcher, send an ack instantly here.
+            """
+            ack_already_exists = False
+            meta = None
+            if pipe_id_hex in client.msg_queues[MsgEnum.MSGACK]:
+                if seq_no in client.msg_queues[MsgEnum.MSGACK][pipe_id_hex]:
+                    meta = client.msg_queues[MsgEnum.MSGACK][pipe_id_hex][seq_no]
+                    ack_already_exists = True
 
             """
             Pass received messages to any registered message handlers.
             Do it before sending back an ack to avoid race conditions in
             receiving more messages before processing in done.
             """
-            for msg_handler in client.msg_handlers:
-                await async_wrap_errors(
-                    msg_handler(
-                        msg,
+            if not ack_already_exists:
+                for msg_handler in client.msg_handlers:
+                    await async_wrap_errors(
+                        msg_handler(
+                            msg,
+                            src_pk_hex,
+                            pipe_id_hex,
+                            client
+                        )
+                    )
+
+            
+            try:
+                if ack_already_exists:
+                    out = client.publish(meta["dest_pk_hex"], meta["out"])
+                    await async_wrap_errors(
+                        client.pipe.send(out)
+                    )
+
+                if not ack_already_exists:
+                    ret = client.send(
+                        "ack",
                         src_pk_hex,
                         pipe_id_hex,
-                        client
+                        MsgEnum.MSGACK,
+                        seq_no=seq_no
                     )
-                )
-
-            try:
-                ret = client.send(
-                    "ack",
-                    src_pk_hex,
-                    pipe_id_hex,
-                    MsgEnum.MSGACK,
-                    seq_no=int(seq_no_hex, 16)
-                )
-                print(ret)
+                    print(ret)
             except Exception:
                 log_exception()
 

@@ -3,7 +3,7 @@ from aionetiface import *
 from sidewire import *
 
 # Server used for tests.
-USE_AF = IP4
+USE_AF = None
 MQTT_SERVER = ("ovh1.p2pd.net", 1883)
 
 def get_mqtt_client(server=MQTT_SERVER):
@@ -35,7 +35,7 @@ async def mqtt_send_msg_and_handle(msg_list, msg_handler):
         )
 
         # Wait for recv msg.
-        await got_ack
+        await asyncio.wait_for(got_ack, 3)
 
     # Cleanup.
     await client.close()
@@ -78,6 +78,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         assert(recv_list == msg_list)
 
             
+    # test messages are only received once
 
     # test send recv multi
 

@@ -4,6 +4,15 @@ from aionetiface import *
 from .mqtt_connect import *
 from .mqtt_packet import *
 
+
+"""
+Dispatcher loop is not optimized. It's not going to be used to send thousands
+of msgs a second but a few messages for signaling to form connections.
+Messages sent with this are minimal.
+
+To keep the code simpler: MSGACKS continue to be sent until the attempts limit 
+has been reached.
+"""
 async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
     counter = 0
     try:
@@ -62,6 +71,14 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
                         meta["attempts"] += 1
                         meta["updated"] = int(time.time())
 
+                        # Only send back acks once.
+                        # Acks are re-sceduled in response to messages.
+                        """
+                        if msg_type == MsgEnum.MSGACK:
+                            if not meta["acked"].done():
+                                meta["acked"].set_result(True)
+                        """
+
                         # Broadcast new message.
                         #print("dispatching ", meta)
                         buf, _ = client.publish(meta["dest_pk_hex"], meta["out"])
@@ -70,11 +87,11 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
                         )
 
             # Used to know when to send a ping.
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
             counter += 1 % 0xFFFFFFFFFF
 
             # Send ping to server every so often.
-            if (counter % ((keep_alive * 10) + 1)) == (keep_alive * 10):
+            if (counter % ((keep_alive * 5) + 1)) == (keep_alive * 5):
                 req = MQTTPacket(MQTTEnum.PINGREQ)
                 buf = req.build()
                 await async_wrap_errors(client.pipe.send(buf))
