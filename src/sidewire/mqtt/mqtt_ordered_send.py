@@ -15,7 +15,7 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
 
     # Create queue per pipe ID.
     if pipe_id_hex not in client.msg_queues[msg_type]:
-        client.msg_queues[msg_type][pipe_id_hex] = []
+        client.msg_queues[msg_type][pipe_id_hex] = {}
 
     # Get seq no
     print("seq no =", seq_no)
@@ -43,18 +43,19 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
 
     # Queue message.
     ack_future = asyncio.Future()
-    client.msg_queues[msg_type][pipe_id_hex].append({
+    client.msg_queues[msg_type][pipe_id_hex][seq_no] = {
         "attempts": 0,
         "dest_pk_hex": dest_pk_hex,
         "seq_no": seq_no,
         "out": out,
         "acked": ack_future,
         "updated": 0
-    })
+    }
     
     # Publish the message as intended.
     #if msg_type == MsgEnum.MSGACK:
     #    await client.publish(dest_pk_hex, out)
 
     # Caller can await ack if they want.
+    print(client.msg_queues[msg_type][pipe_id_hex][seq_no], seq_no, msg_type)
     return out, ack_future

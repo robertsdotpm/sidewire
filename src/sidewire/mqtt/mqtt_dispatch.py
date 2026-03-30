@@ -32,24 +32,33 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
                         # Server still down.
                         pass
 
+                    print("In disconnect loop?")
                     await asyncio.sleep(60)
+
+            print(client.msg_queues)
 
             # Process messages in various queues.
             for msg_type in client.msg_queues:
                 for pipe_id_hex in client.msg_queues[msg_type]:
-                    for meta in client.msg_queues[msg_type][pipe_id_hex]:
+                    for seq_no in client.msg_queues[msg_type][pipe_id_hex]:
+                        meta = client.msg_queues[msg_type][pipe_id_hex][seq_no]
+                        print("d", msg_type, " ", meta)
+
                         # Already acked -- try next in line.
                         if meta["acked"].done():
+                            print("ed: acked done")
                             continue
 
                         # Don't rebroadcast if too soon.
                         elapsed = int(time.time()) - meta["updated"]
                         if elapsed < interval:
-                            break
+                            print("ed: elapsed < interval", elapsed, " ", interval)
+                            continue
 
                         # Give up on acking this line of messages if too many past.
                         if meta["attempts"] >= attempts:
-                            break
+                            print("ed: attempts >= attempts")
+                            continue
 
                         # Increase state counters.
                         meta["attempts"] += 1
@@ -75,4 +84,7 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
         print("dispatcher exited.")
         # Cleanup handled by caller.
     except Exception:
+        what_exception()
         log_exception()
+
+    print("dispatcher exited cleanly.")

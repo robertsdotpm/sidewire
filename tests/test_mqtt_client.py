@@ -4,17 +4,40 @@ from sidewire import *
 # Server used for tests.
 MQTT_SERVER = ("ovh1.p2pd.net", 1883)
 
+
 def get_mqtt_client(server=MQTT_SERVER):
     nic = Interface("default")
     af = nic.supported()[0]
+    # TODO: or get af from cmd line if defined
+
     kp = Signing.keypair()
     client = MQTTClient(af, nic, server, kp)
     return client
 
-class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
-    async def test_something(self):
-        print("here")
+async def mqtt_send_msg_and_handle(msg_list, msg_handler):
+    # Create client and install a message handler.
+    client = get_mqtt_client()
+    client.add_msg_handler(msg_handler)
 
+    # Connect client to server.
+    await client.connect()
+
+    # Send a message.
+    pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
+    for buf in msg_list:
+        _, got_ack = client.send(
+            buf,
+            to_hs(client.kp.compact_public_key), # To self,
+            pipe_id_hex
+        )
+
+        # Wait for recv msg.
+        await got_ack
+
+    # Cleanup.
+    await client.close()
+
+class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
     async def test_connect_single_success(self):
         client = get_mqtt_client()
         pipe = await client.connect()
@@ -32,33 +55,36 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 
     async def test_single_send_recv(self):
         buf = "msg to send"
-        client = get_mqtt_client()
         got_msg = asyncio.Event()
 
         async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
             if msg == buf:
                 got_msg.set()
 
-        client.add_msg_handler(msg_handler)
-
-        await client.connect()
-
-        print(client)
-
-        pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
-        _, got_ack = client.send(
-            buf,
-            to_hs(client.kp.compact_public_key), # To self,
-            pipe_id_hex
-        )
-
-        await asyncio.wait_for(got_ack, 3)
+        await mqtt_send_msg_and_handle([buf], msg_handler)
         assert(got_msg.is_set())
-        await client.close()
-        
+
+    async def test_seq_send_recv(self):
+        msg_list = ["this is first", "second", "third", "fourth"]
+        recv_list = []
+
+        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+            recv_list.append(msg)
+
+        await mqtt_send_msg_and_handle(msg_list, msg_handler)
+        print(recv_list)
+        #assert(recv_list == msg_list)
+
+            
     # Test seq send recv
 
     # test send recv multi
+
+    # Check other servers work
+
+    # ipv6 tests (support af as a command line and reuse existing tests)
+
+    # Test disconnect rebroadcast
         
 
 

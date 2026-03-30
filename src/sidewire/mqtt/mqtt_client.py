@@ -41,7 +41,7 @@ class MQTTClient:
             MQTTEnum.PUBACK: {},
         }
 
-        # Plugin message system [enum][pipe id] = list[{msg meta}] queue
+        # Plugin message system [enum][pipe id][seq_no] = meta
         self.msg_queues = {
             MsgEnum.MSG: {},
             MsgEnum.MSGACK: {},

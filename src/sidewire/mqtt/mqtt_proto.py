@@ -22,11 +22,13 @@ async def handle_mqtt_packet(client, packet):
             # Strip packet_id from variable header.
             packet_id = packet.body[:2]
             if packet_id not in client.packet_ids[packet_type]:
+                print("e: packet id not in packet ids")
                 return
 
             # Future to signal ack received for certain packets.
             ack_future = client.packet_ids[packet_type][packet_id]
             if ack_future.done():
+                print("e: ack future done.")
                 return
             
             # Sets the return code only for SUBACK otherwise empty str.
@@ -40,7 +42,7 @@ async def handle_mqtt_packet(client, packet):
         print(out)
 
         if not out:
-            print("invalid publish packet")
+            print("e: invalid publish packet")
             return
         
         topic, payload, packet_id = out
@@ -52,7 +54,7 @@ async def handle_mqtt_packet(client, packet):
         # Only interested in messages for our pub key.
         compact_public_key = h_to_b(topic)
         if compact_public_key != client.kp.compact_public_key:
-            print("Recv msg not meant for us.")
+            print("e: Recv msg not meant for us.")
 
         print("payload = ", payload)
 
@@ -78,7 +80,7 @@ async def handle_mqtt_packet(client, packet):
         )
 
         if not is_valid_sig:
-            print("invalid sig for ", msg)
+            print("e: invalid sig for ", msg)
             return
         
         # The message we wish to send still has app-specific type.
@@ -89,7 +91,8 @@ async def handle_mqtt_packet(client, packet):
 
         # If a regular message is received then send an ACK back to owner.
         if MsgEnum.MSG == msg_type:
-            print("sending back ack to src")
+            print("sending back ack to src ", int(seq_no_hex, 16))
+
 
             """
             Pass received messages to any registered message handlers.
@@ -97,20 +100,28 @@ async def handle_mqtt_packet(client, packet):
             receiving more messages before processing in done.
             """
             for msg_handler in client.msg_handlers:
-                await msg_handler(
-                    msg,
-                    src_pk_hex,
-                    pipe_id_hex,
-                    client
+                await async_wrap_errors(
+                    msg_handler(
+                        msg,
+                        src_pk_hex,
+                        pipe_id_hex,
+                        client
+                    )
                 )
 
-            client.send(
-                "ack",
-                src_pk_hex,
-                pipe_id_hex,
-                MsgEnum.MSGACK,
-                seq_no=int(seq_no_hex, 16)
-            )
+            try:
+                ret = client.send(
+                    "ack",
+                    src_pk_hex,
+                    pipe_id_hex,
+                    MsgEnum.MSGACK,
+                    seq_no=int(seq_no_hex, 16)
+                )
+                print(ret)
+            except Exception:
+                log_exception()
+
+            print("after sent ack to src")
             
             return
         
@@ -120,7 +131,7 @@ async def handle_mqtt_packet(client, packet):
 
             # Message doesn't belong to any registered pipes.
             if pipe_id_hex not in client.msg_queues[MsgEnum.MSG]:
-                print("msg ack: in valid pipe id")
+                print("e: msg ack: in valid pipe id")
                 return
             
             msg_queue = client.msg_queues[MsgEnum.MSG][pipe_id_hex]
@@ -128,16 +139,18 @@ async def handle_mqtt_packet(client, packet):
             # Seq no overflows message queue.
             seq_no = int(seq_no_hex, 16)
             if seq_no > len(msg_queue):
-                print("msg ack seq no invalid")
+                print("e: msg ack seq no invalid")
                 return
             
             # Load meta data for msg waiting for ack.
             msg_meta = msg_queue[seq_no]
             if msg_meta["acked"].done():
+                print("e: msg meta acked done")
                 return
             
             # Only the dest for a message should be able to ACK it.
             if msg_meta["dest_pk_hex"] != src_pk_hex:
+                print("e: msg ack dest pk hex not src pk hex")
                 return
             
             # Ack a message being sent to a host.
