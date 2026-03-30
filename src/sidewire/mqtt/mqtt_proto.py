@@ -91,6 +91,15 @@ async def handle_mqtt_packet(client, packet):
 
         # If a regular message is received then send an ACK back to owner.
         if MsgEnum.MSG == msg_type:
+            # Message-level uniqueness checks.
+            sent_msg_id = hashlib.sha256(to_b(msg)).hexdigest()
+            print("sent_msg_id", sent_msg_id)
+            if sent_msg_id in client.sent_msg_ids:
+                return
+            else:
+                client.sent_msg_ids[sent_msg_id] = 1
+
+
             print("sending back ack to src ", int(seq_no_hex, 16))
             seq_no = int(seq_no_hex, 16)
 

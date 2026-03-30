@@ -13,7 +13,7 @@ Messages sent with this are minimal.
 To keep the code simpler: MSGACKS continue to be sent until the attempts limit 
 has been reached.
 """
-async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
+async def dispatcher(client, attempts=3, interval=60, keep_alive=30, ignore_acked=False):
     counter = 0
     try:
         """
@@ -49,12 +49,13 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
                 for pipe_id_hex in client.msg_queues[msg_type]:
                     for seq_no in client.msg_queues[msg_type][pipe_id_hex]:
                         meta = client.msg_queues[msg_type][pipe_id_hex][seq_no]
-                        print("d", msg_type, " ", meta)
+                        #print("d", msg_type, " ", meta)
 
                         # Already acked -- try next in line.
-                        if meta["acked"].done():
-                            #print("ed: acked done")
-                            continue
+                        if not ignore_acked:
+                            if meta["acked"].done():
+                                #print("ed: acked done")
+                                continue
 
                         # Don't rebroadcast if too soon.
                         elapsed = int(time.time()) - meta["updated"]

@@ -17,13 +17,13 @@ def get_mqtt_client(server=MQTT_SERVER):
     client = MQTTClient(af, nic, server, kp)
     return client
 
-async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, attempts=3, interval=2, keep_alive=30, timeout=5):
+async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, attempts=3, interval=2, keep_alive=30, timeout=5, ignore_timeout=False, min_sleep=0, ignore_acked=False):
     # Create client and install a message handler.
     client = get_mqtt_client()
     client.add_msg_handler(msg_handler)
 
     # Connect client to server.
-    await client.connect(attempts, interval, keep_alive)
+    await client.connect(attempts, interval, keep_alive, ignore_acked)
     if do_close:
         client.pipe.sock.close()
 
@@ -36,8 +36,18 @@ async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, attemp
             pipe_id_hex
         )
 
+        # Sleep timeout.
+        if min_sleep:
+            await asyncio.sleep(min_sleep)
+
         # Wait for recv msg.
-        await asyncio.wait_for(got_ack, timeout)
+        if ignore_timeout:
+            try:
+                await asyncio.wait_for(got_ack, timeout)
+            except asyncio.TimeoutError:
+                pass
+        else:
+            await asyncio.wait_for(got_ack, timeout)
 
     # Cleanup.
     await client.close()
@@ -90,8 +100,33 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         await mqtt_send_msg_and_handle([buf], msg_handler, do_close=True)
         assert(got_msg.is_set())
 
-            
-    # test messages are only received once
+    async def test_single_recv_once(self):
+        msg_list = ["first msg", "first msg"]
+        recv_list = []
+
+        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+            recv_list.append(msg)
+
+        await mqtt_send_msg_and_handle(msg_list, msg_handler, ignore_timeout=True)
+
+        # Part 1: no message duplication.
+        assert(recv_list != msg_list)
+        #assert(recv_list == msg_list)
+    
+
+        # Part 2: no duplication from rebroadcasts.
+        msg_list = ["first msg"]
+        recv_list = []
+
+        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+            recv_list.append(msg)
+
+        # Allows time for rebroadcast.
+        await mqtt_send_msg_and_handle(msg_list, msg_handler, min_sleep=6, ignore_acked=True)
+
+        assert(recv_list == msg_list)
+        print(recv_list)
+
 
     # test send recv multi
 

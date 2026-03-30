@@ -48,6 +48,9 @@ class MQTTClient:
             MsgEnum.MSGACK: {},
         }
 
+        # Msg part unpacked from the full proto over publish.
+        self.sent_msg_ids = {}
+
         # Handle received messages.
         self.msg_handlers = []
 
@@ -61,7 +64,7 @@ class MQTTClient:
     def add_msg_handler(self, msg_handler):
         self.msg_handlers.append(msg_handler)
     
-    async def connect(self, attempts=3, interval=60, keep_alive=MQTT_KEEP_ALIVE):
+    async def connect(self, attempts=3, interval=60, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False):
         pipe = await mqtt_connect(self, keep_alive)
         if pipe:
             """
@@ -76,6 +79,7 @@ class MQTTClient:
                         attempts=attempts,
                         interval=interval,
                         keep_alive=int(keep_alive / 2),
+                        ignore_acked=ignore_acked,
                     )
                 )
             )
