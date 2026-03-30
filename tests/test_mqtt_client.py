@@ -139,6 +139,50 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         await client.close()
         assert(len(got_ping))
 
+    """
+    Asyncio is "reactive" -- so it triggers disconnect after an attempt to use a
+    connection fails with broken errors. It doesn't poll for such things.
+    Hence we use the ping feature to make the client reconnect earlier.
+
+    this really means that we need attempts to be some function of interval
+    and keep_alive so it ends up falling within a reconnect cycle.
+    This code works but shows that the chosen consts arent good.
+    """
+    async def test_broken_receiver(self):
+        msg_list = ["first msg"]
+        recv_list = []
+
+        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+            recv_list.append(msg)
+
+        alice_client = get_mqtt_client()
+        bob_client = get_mqtt_client()
+
+        # Bob handles received messages.
+        bob_client.add_msg_handler(msg_handler)
+
+        # Connect clients.
+        keep_alive = 60
+        await alice_client.connect(interval=int(keep_alive / 2) * 4)
+        await bob_client.connect(interval=2, reconnect_delay=2, keep_alive=keep_alive)
+
+        # Disconnect bob.
+        bob_client.pipe.sock.close()
+
+        # Send message to bob.
+        pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
+        for buf in msg_list:
+            _, got_ack = alice_client.send(
+                buf,
+                bob_client.kp.public_key_hex,
+                pipe_id_hex
+            )
+            
+            await got_ack
+
+        await alice_client.close()
+        await bob_client.close()
+
 
     # test send recv multi
 

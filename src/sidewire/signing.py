@@ -1,4 +1,5 @@
 from ecdsa import VerifyingKey, SECP256k1, SigningKey, util
+from aionetiface import *
 
 class Signing():
     def __init__(self, priv=None, pub=None, curve=SECP256k1):
@@ -6,6 +7,7 @@ class Signing():
         self.private_key = priv
         self.public_key = pub or priv.get_verifying_key()
         self.compact_public_key = self.public_key.to_string("compressed")
+        self.public_key_hex = to_hs(self.compact_public_key)
 
     @staticmethod
     def keypair(curve=SECP256k1):

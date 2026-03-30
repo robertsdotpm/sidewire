@@ -13,7 +13,7 @@ Messages sent with this are minimal.
 To keep the code simpler: MSGACKS continue to be sent until the attempts limit 
 has been reached.
 """
-async def dispatcher(client, attempts=3, interval=60, keep_alive=30, ignore_acked=False):
+async def dispatcher(client, attempts=3, interval=60, keep_alive=30, ignore_acked=False, reconnect_delay=0):
     counter = 0
     try:
         """
@@ -25,6 +25,9 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30, ignore_acke
         to set on_close for the pipe event.
         """
         while not client.is_closed.is_set():
+            if reconnect_delay:
+                await asyncio.sleep(reconnect_delay)
+                
             if client.pipe is None or client.pipe.on_close.is_set():
                 print("Got con lost event")
                 while not client.is_closed.is_set():
