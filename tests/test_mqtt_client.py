@@ -162,9 +162,9 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         bob_client.add_msg_handler(msg_handler)
 
         # Connect clients.
-        keep_alive = 60
-        await alice_client.connect(interval=int(keep_alive / 2) * 4)
-        await bob_client.connect(interval=2, reconnect_delay=2, keep_alive=keep_alive)
+        keep_alive = 10
+        await alice_client.connect()
+        await bob_client.connect(reconnect_delay=2, keep_alive=keep_alive)
 
         # Disconnect bob.
         bob_client.pipe.sock.close()
@@ -188,9 +188,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 
     # Check other servers work
 
-    # test retransmit works if other client disconnects (simulate it being down for a moment.)
-
-
+# TODO: work out better parameters that handle reactive disconncet better
 # TODO: handle disconnect message.
 # todo write docs at top of different files
 

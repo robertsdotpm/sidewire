@@ -1,5 +1,6 @@
 import time
 import asyncio
+import math
 from aionetiface import *
 from .mqtt_connect import *
 from .mqtt_packet import *
@@ -13,8 +14,9 @@ Messages sent with this are minimal.
 To keep the code simpler: MSGACKS continue to be sent until the attempts limit 
 has been reached.
 """
-async def dispatcher(client, attempts=3, interval=60, keep_alive=30, ignore_acked=False, reconnect_delay=0):
-    counter = 0
+async def dispatcher(client, attempts, interval, keep_alive, ignore_acked=False, reconnect_delay=0):
+    attempts = attempts or math.ceil((2 * keep_alive) / interval)
+    last_ping = asyncio.get_event_loop().time()
     try:
         """
         Putting the reconnect loop at the start helps ensure that later code
@@ -27,7 +29,7 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30, ignore_acke
         while not client.is_closed.is_set():
             if reconnect_delay:
                 await asyncio.sleep(reconnect_delay)
-                
+
             if client.pipe is None or client.pipe.on_close.is_set():
                 print("Got con lost event")
                 while not client.is_closed.is_set():
@@ -92,10 +94,11 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30, ignore_acke
 
             # Used to know when to send a ping.
             await asyncio.sleep(0.5)
-            counter += 1 % 0xFFFFFFFFFF
 
             # Send ping to server every so often.
-            if counter % (keep_alive * 2) == 0:
+            now = asyncio.get_event_loop().time()
+            if now - last_ping >= keep_alive:
+                last_ping = now
                 req = MQTTPacket(MQTTEnum.PINGREQ)
                 buf = req.build()
                 await async_wrap_errors(client.pipe.send(buf))
