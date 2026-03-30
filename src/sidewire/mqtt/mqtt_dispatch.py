@@ -92,7 +92,7 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30, ignore_acke
             counter += 1 % 0xFFFFFFFFFF
 
             # Send ping to server every so often.
-            if (counter % ((keep_alive * 5) + 1)) == (keep_alive * 5):
+            if counter % (keep_alive * 2) == 0:
                 req = MQTTPacket(MQTTEnum.PINGREQ)
                 buf = req.build()
                 await async_wrap_errors(client.pipe.send(buf))

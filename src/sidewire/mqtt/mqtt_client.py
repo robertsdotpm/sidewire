@@ -63,6 +63,9 @@ class MQTTClient:
     
     def add_msg_handler(self, msg_handler):
         self.msg_handlers.append(msg_handler)
+
+    async def ping_handler(self):
+        pass
     
     async def connect(self, attempts=3, interval=60, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False):
         pipe = await mqtt_connect(self, keep_alive)

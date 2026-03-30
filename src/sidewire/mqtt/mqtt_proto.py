@@ -193,7 +193,8 @@ async def handle_mqtt_packet(client, packet):
 
     # Handle ping from server.
     if MQTTEnum.PINGRESP == packet.type:
-        #print("got ping response.")
+        print("got ping response.")
+        await client.ping_handler()
         return
     
 # TCP streaming protocol handler for MQTT.

@@ -125,7 +125,19 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         await mqtt_send_msg_and_handle(msg_list, msg_handler, min_sleep=6, ignore_acked=True)
 
         assert(recv_list == msg_list)
-        print(recv_list)
+
+    async def test_ping_resp(self):
+        client = get_mqtt_client()
+        got_ping = []
+
+        async def ping_handler():
+            got_ping.append(True)
+
+        client.ping_handler = ping_handler
+        await client.connect(keep_alive=2)
+        await asyncio.sleep(6)
+        await client.close()
+        assert(len(got_ping))
 
 
     # test send recv multi
@@ -134,7 +146,6 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 
     # test retransmit works if other client disconnects (simulate it being down for a moment.)
 
-    # Check that ping is working.
 
 # TODO: handle disconnect message.
 # todo write docs at top of different files
