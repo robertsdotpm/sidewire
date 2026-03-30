@@ -35,29 +35,27 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
                     print("In disconnect loop?")
                     await asyncio.sleep(60)
 
-            print(client.msg_queues)
-
             # Process messages in various queues.
             for msg_type in client.msg_queues:
                 for pipe_id_hex in client.msg_queues[msg_type]:
                     for seq_no in client.msg_queues[msg_type][pipe_id_hex]:
                         meta = client.msg_queues[msg_type][pipe_id_hex][seq_no]
-                        print("d", msg_type, " ", meta)
+                        #print("d", msg_type, " ", meta)
 
                         # Already acked -- try next in line.
                         if meta["acked"].done():
-                            print("ed: acked done")
+                            #print("ed: acked done")
                             continue
 
                         # Don't rebroadcast if too soon.
                         elapsed = int(time.time()) - meta["updated"]
                         if elapsed < interval:
-                            print("ed: elapsed < interval", elapsed, " ", interval)
+                            #print("ed: elapsed < interval", elapsed, " ", interval)
                             continue
 
                         # Give up on acking this line of messages if too many past.
                         if meta["attempts"] >= attempts:
-                            print("ed: attempts >= attempts")
+                            #print("ed: attempts >= attempts")
                             continue
 
                         # Increase state counters.
@@ -65,18 +63,18 @@ async def dispatcher(client, attempts=3, interval=60, keep_alive=30):
                         meta["updated"] = int(time.time())
 
                         # Broadcast new message.
-                        print("dispatching ", meta)
+                        #print("dispatching ", meta)
                         buf, _ = client.publish(meta["dest_pk_hex"], meta["out"])
                         await async_wrap_errors(
                             client.pipe.send(buf)
                         )
 
             # Used to know when to send a ping.
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.1)
             counter += 1 % 0xFFFFFFFFFF
 
             # Send ping to server every so often.
-            if (counter % (keep_alive + 1)) == keep_alive:
+            if (counter % ((keep_alive * 10) + 1)) == (keep_alive * 10):
                 req = MQTTPacket(MQTTEnum.PINGREQ)
                 buf = req.build()
                 await async_wrap_errors(client.pipe.send(buf))

@@ -5,6 +5,7 @@ topic (33 their pub key)
     msg format: 33 our_pub_key, 64 sig over ( 32 pipe_id, 4 seq_no, msg )
     ^ allows ack back
 
+    add basic checks to avoid overwriting pre-existing seq no msg queues
 """
 
 import hashlib

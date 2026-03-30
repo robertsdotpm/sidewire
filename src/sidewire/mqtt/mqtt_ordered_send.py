@@ -42,6 +42,7 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
     assert(len(out) == (266 + len(msg)))
 
     # Queue message.
+    assert(seq_no not in client.msg_queues[msg_type][pipe_id_hex])
     ack_future = asyncio.Future()
     client.msg_queues[msg_type][pipe_id_hex][seq_no] = {
         "attempts": 0,
@@ -57,5 +58,4 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
     #    await client.publish(dest_pk_hex, out)
 
     # Caller can await ack if they want.
-    print(client.msg_queues[msg_type][pipe_id_hex][seq_no], seq_no, msg_type)
     return out, ack_future

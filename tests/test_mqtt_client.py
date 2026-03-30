@@ -1,14 +1,17 @@
+import argparse
 from aionetiface import *
 from sidewire import *
 
 # Server used for tests.
+USE_AF = IP4
 MQTT_SERVER = ("ovh1.p2pd.net", 1883)
-
 
 def get_mqtt_client(server=MQTT_SERVER):
     nic = Interface("default")
-    af = nic.supported()[0]
-    # TODO: or get af from cmd line if defined
+    if USE_AF:
+        af = USE_AF
+    else:
+        af = nic.supported()[0]
 
     kp = Signing.keypair()
     client = MQTTClient(af, nic, server, kp)
@@ -72,17 +75,13 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             recv_list.append(msg)
 
         await mqtt_send_msg_and_handle(msg_list, msg_handler)
-        print(recv_list)
-        #assert(recv_list == msg_list)
+        assert(recv_list == msg_list)
 
             
-    # Test seq send recv
 
     # test send recv multi
 
     # Check other servers work
-
-    # ipv6 tests (support af as a command line and reuse existing tests)
 
     # Test disconnect rebroadcast
         
