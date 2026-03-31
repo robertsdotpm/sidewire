@@ -184,12 +184,23 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         await alice_client.close()
         await bob_client.close()
 
+    # Add all the messages concurrently with send then check result.
+    async def test_seq_send_recv_revisited(self):
+        msg_list = ["this is first", "second", "third", "fourth"]
+        recv_list = []
+
+        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+            recv_list.append(msg)
+
+        await mqtt_send_msg_and_handle(msg_list, msg_handler)
+        assert(recv_list == msg_list)
+
 
     # test send recv multi
-
     # Check other servers work
 
-# TODO: use msg repub time instead and ensure it covers the boundary
+# I dont think the dispatch loop actually waits for acks in order
+    # Todo fix this -- current code has caller handling the scheduling
 # TODO: handle disconnect message.
 # todo write docs at top of different files
 
