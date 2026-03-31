@@ -67,7 +67,7 @@ class MQTTClient:
     async def ping_handler(self):
         pass
     
-    async def connect(self, attempts=None, interval=4, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False, reconnect_delay=0):
+    async def connect(self, republish_duration=60, interval=4, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False, reconnect_delay=0):
         pipe = await mqtt_connect(self, keep_alive)
         if pipe:
             """
@@ -79,7 +79,7 @@ class MQTTClient:
                 async_wrap_errors(
                     dispatcher(
                         self,
-                        attempts=attempts,
+                        republish_duration=republish_duration,
                         interval=interval,
                         keep_alive=int(keep_alive / 2),
                         ignore_acked=ignore_acked,

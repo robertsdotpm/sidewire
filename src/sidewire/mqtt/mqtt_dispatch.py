@@ -13,9 +13,12 @@ Messages sent with this are minimal.
 
 To keep the code simpler: MSGACKS continue to be sent until the attempts limit 
 has been reached.
+
+Can potentially go wrong if both sides use different keep_alive intervals
+and using attempts based on the formula for interval and keep alive checks.
 """
-async def dispatcher(client, attempts, interval, keep_alive, ignore_acked=False, reconnect_delay=0):
-    attempts = attempts or math.ceil((2 * keep_alive) / interval)
+async def dispatcher(client, republish_duration, interval, keep_alive, ignore_acked=False, reconnect_delay=0):
+    republish_duration = max(republish_duration, 2 * keep_alive)
     last_ping = asyncio.get_event_loop().time()
     try:
         """
@@ -63,19 +66,21 @@ async def dispatcher(client, attempts, interval, keep_alive, ignore_acked=False,
                                 continue
 
                         # Don't rebroadcast if too soon.
-                        elapsed = int(time.time()) - meta["updated"]
-                        if elapsed < interval:
+                        now = int(asyncio.get_event_loop().time())
+                        interval_elapsed = now - meta["updated"]
+                        if interval_elapsed < interval:
                             #print("ed: elapsed < interval", elapsed, " ", interval)
                             continue
 
-                        # Give up on acking this line of messages if too many past.
-                        if meta["attempts"] >= attempts:
+                        # Republish duration exceeded.
+                        total_elapsed = now - meta["created"]
+                        if total_elapsed >= republish_duration:
                             #print("ed: attempts >= attempts")
                             continue
 
                         # Increase state counters.
                         meta["attempts"] += 1
-                        meta["updated"] = int(time.time())
+                        meta["updated"] = now
 
                         # Only send back acks once.
                         # Acks are re-sceduled in response to messages.

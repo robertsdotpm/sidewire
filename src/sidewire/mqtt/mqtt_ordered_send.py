@@ -47,6 +47,7 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
     assert(seq_no not in client.msg_queues[msg_type][pipe_id_hex])
 
     # Queue message.
+    now = int(asyncio.get_event_loop().time())
     ack_future = asyncio.Future()
     client.msg_queues[msg_type][pipe_id_hex][seq_no] = {
         "attempts": 0,
@@ -54,7 +55,8 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
         "seq_no": seq_no,
         "out": out,
         "acked": ack_future,
-        "updated": 0
+        "updated": 0,
+        "created": now,
     }
     
     # Publish the message as intended.

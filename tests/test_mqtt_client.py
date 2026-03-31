@@ -17,13 +17,13 @@ def get_mqtt_client(server=MQTT_SERVER):
     client = MQTTClient(af, nic, server, kp)
     return client
 
-async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, attempts=3, interval=2, keep_alive=30, timeout=5, ignore_timeout=False, min_sleep=0, ignore_acked=False):
+async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republish_duration=60, interval=2, keep_alive=30, timeout=5, ignore_timeout=False, min_sleep=0, ignore_acked=False):
     # Create client and install a message handler.
     client = get_mqtt_client()
     client.add_msg_handler(msg_handler)
 
     # Connect client to server.
-    await client.connect(attempts, interval, keep_alive, ignore_acked)
+    await client.connect(republish_duration, interval, keep_alive, ignore_acked)
     if do_close:
         client.pipe.sock.close()
 
@@ -147,6 +147,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
     this really means that we need attempts to be some function of interval
     and keep_alive so it ends up falling within a reconnect cycle.
     This code works but shows that the chosen consts arent good.
+
     """
     async def test_broken_receiver(self):
         msg_list = ["first msg"]
@@ -188,7 +189,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 
     # Check other servers work
 
-# TODO: work out better parameters that handle reactive disconncet better
+# TODO: use msg repub time instead and ensure it covers the boundary
 # TODO: handle disconnect message.
 # todo write docs at top of different files
 
