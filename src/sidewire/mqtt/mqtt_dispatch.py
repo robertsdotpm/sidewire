@@ -1,3 +1,29 @@
+"""
+The main class interface feeds plugin-specific queues ordered messages. Each message
+has an application-level ACK attached to it. The dispatcher is a background task
+that loops over all messages and republishes them so long as:
+- still within msg's republish duration
+- outside the last interval sent
+- not already acked
+
+The dispatcher doesn't try to maintain ordering of messages in a queue based
+on next to send after a message has been "acked." The caller of send is expected
+not to queue any more messages for their protocol until they receive an ack for the
+current send. This keeps the dispatcher code simple.
+
+It also allows easier optimization: eg. receiving a message implies that 
+the other side also received an ack for the old message, thus we can delete
+acking all past messages less than the current sequence number.
+
+It should be noted that because this dispatcher doesnt enforce ordering calling:
+
+for ...
+    client.send
+
+... without awaiting the returned ack means that event handlers passed to send are
+run in a random order due to race conditions.
+"""
+
 import time
 import asyncio
 import math
@@ -10,9 +36,6 @@ from .mqtt_packet import *
 Dispatcher loop is not optimized. It's not going to be used to send thousands
 of msgs a second but a few messages for signaling to form connections.
 Messages sent with this are minimal.
-
-To keep the code simpler: MSGACKS continue to be sent until the attempts limit 
-has been reached.
 
 Can potentially go wrong if both sides use different keep_alive intervals
 and using attempts based on the formula for interval and keep alive checks.

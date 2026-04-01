@@ -1,11 +1,28 @@
 """
+This module implements a basic async MQTT client. It is not designed to be
+generic like a regular MQTT client. Instead it supports:
 
-topic (33 their pub key)
-    in bytes -- double all for hex
-    msg format: 33 our_pub_key, 64 sig over ( 32 pipe_id, 4 seq_no, msg )
-    ^ allows ack back
+    - identity management -- clients subscribe to their own ECDSA pub key hex
+    - authenticated messages -- all messages are signed by the sender, replies
+    are sent back to originating pub key hex channel
+    - sequential messaging -- bare-bones MQTT doesn't have ordered messaging
+    this allows MQTT to be multi-plexed and into ordered pipes
+    - reliable delivery -- application level acks allow message delivery to be
+    confirmed before moving to next message
 
-    add basic checks to avoid overwriting pre-existing seq no msg queues
+The main class interface is designed to be sync without any network I/O. All I/O
+is instead confined to a background message dispatcher written to be simple. This
+makes it easier to recover from network disconnects and resume publishing. If there
+is only one major place to detect network errors it makes it easier to handle errors.
+The client uses a simple buffer for incoming data from TCP until any number of
+full packets are ready to be processed (this is how to correctly handle TCP.)
+
+module files:
+    - schedule messages to send, connect to server - mqtt client
+    - recv data and pass messages on to handlers - mqtt protocol
+    - send out queued messages and reconnect on con lost - mqtt dispatcher
+    - handle connection in detail - mqtt connect
+    - craft and unpack various mqtt packets - mqtt packet
 """
 
 import hashlib

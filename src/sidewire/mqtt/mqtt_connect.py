@@ -1,3 +1,12 @@
+"""
+Connects to an MQTT server and subscribes to an ECDSA public key.
+Checks if subscribe and connect were successful. Exception if it wasn't.
+Registers the main chunked byte reader for processing partial or full packets
+when done.
+"""
+
+# TODO: clean up this func.
+
 import hashlib
 import asyncio
 from aionetiface import *

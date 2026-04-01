@@ -206,7 +206,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 # test send recv multi
 # Check other servers work
 # TODO: handle disconnect message.
-# todo write docs at top of different files
+# write new signal router
 
 
 if __name__ == '__main__':

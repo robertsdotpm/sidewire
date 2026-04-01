@@ -85,6 +85,7 @@ def mqtt_parse_publish(packet):
     payload = to_s(body[offset:])
 
     return topic, payload, packet_id
+
     
 def mqtt_parse_packet(raw):
     offset = 0
@@ -109,7 +110,6 @@ def mqtt_parse_packet(raw):
     pkt.body = body
 
     return pkt
-
     
 if __name__ == "__main__":
     topic = "test/topic"

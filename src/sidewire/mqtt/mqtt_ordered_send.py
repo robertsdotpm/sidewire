@@ -1,3 +1,24 @@
+"""
+Given a message to send on a high level pipe_id and a destination pub key:
+create the bytes needed to send to as a publish packet in MQTT to that
+channel (dest_pk_hex is the channel.) This function can also be used for
+application level ACK replies (msg_type = MsEnum.MSGACK.) So two queues
+for each pipe_id_hex based on whether its a message or an ack for a msg.
+
+topic (66 dest ecdsa pub key)
+    66 our_hex_pub_key,
+    128 sig over 
+        ( 64 pipe_id_hex, 8 seq_no_hex, 2 msg_type_hex msg ... )
+
+messages are queued by:
+    [pipe_id_hex][int msg_type][int seq_no] = meta
+
+meta:
+    msg
+    dest pub key
+    etc
+"""
+
 import asyncio
 from aionetiface import *
 from .mqtt_defs import *
