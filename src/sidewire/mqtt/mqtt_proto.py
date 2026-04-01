@@ -103,6 +103,8 @@ async def handle_mqtt_packet(client, packet):
             print("sending back ack to src ", int(seq_no_hex, 16))
             seq_no = int(seq_no_hex, 16)
 
+            # Delete all acks older than this seq_no.
+
             """
             If a message is sent back to us we may already have called
             a func for the ack but they haven't received the ack.
@@ -111,6 +113,12 @@ async def handle_mqtt_packet(client, packet):
             ack_already_exists = False
             meta = None
             if pipe_id_hex in client.msg_queues[MsgEnum.MSGACK]:
+                # Optimization: Delete all acks older than this seq_no.
+                for old_seq_no in list(client.msg_queues[MsgEnum.MSGACK][pipe_id_hex].keys()):
+                    if old_seq_no < seq_no:
+                        del client.msg_queues[MsgEnum.MSGACK][pipe_id_hex][old_seq_no]
+
+                # This message has already been acked.
                 if seq_no in client.msg_queues[MsgEnum.MSGACK][pipe_id_hex]:
                     meta = client.msg_queues[MsgEnum.MSGACK][pipe_id_hex][seq_no]
                     ack_already_exists = True

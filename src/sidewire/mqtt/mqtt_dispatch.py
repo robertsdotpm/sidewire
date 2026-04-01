@@ -54,40 +54,27 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
 
             # Process messages in various queues.
             for msg_type in client.msg_queues:
-                for pipe_id_hex in client.msg_queues[msg_type]:
+                for pipe_id_hex in list(client.msg_queues[msg_type].keys()):
                     seq_nos = client.msg_queues[msg_type][pipe_id_hex].keys()
+                    now = asyncio.get_event_loop().time()
                     for seq_no in sorted(list(seq_nos)):
                         meta = client.msg_queues[msg_type][pipe_id_hex][seq_no]
                         #print("d", msg_type, " ", meta)
 
-                        # Already acked -- try next in line.
-                        do_continue = True
                         if meta["acked"].done():
-                            if not ignore_acked:
-                            #print("ed: acked done")
-                                continue
-                        else:
-                            if msg_type == MsgEnum.MSG:
-                                do_continue = False
+                            continue
 
                         # Don't rebroadcast if too soon.
-                        now = int(asyncio.get_event_loop().time())
                         interval_elapsed = now - meta["updated"]
                         if interval_elapsed < interval:
                             #print("ed: elapsed < interval", elapsed, " ", interval)
-                            if do_continue:
-                                continue
-                            else:
-                                break
+                            continue
 
                         # Republish duration exceeded.
                         total_elapsed = now - meta["created"]
                         if total_elapsed >= republish_duration:
                             #print("ed: attempts >= attempts")
-                            if do_continue:
-                                continue
-                            else:
-                                break
+                            continue
 
                         # Increase state counters.
                         meta["updated"] = now
@@ -98,10 +85,6 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
                         await async_wrap_errors(
                             client.pipe.send(buf)
                         )
-
-                        # Don't proceed to next until current is acked.
-                        if not do_continue:
-                            break
 
             # Used to know when to send a ping.
             await asyncio.sleep(0.5)
