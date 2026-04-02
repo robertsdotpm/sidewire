@@ -230,7 +230,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 
         #host_list = ["ovh1.p2pd.net"]
 
-        msg_list = ["first msg", "second msg", "third ms"]
+        msg_list = ["first msg", "second msg", "third"]
 
         for host in host_list:
             print("testing ", host)
