@@ -5,10 +5,8 @@ Registers the main chunked byte reader for processing partial or full packets
 when done.
 """
 
-# TODO: clean up this func.
-
-import hashlib
 import asyncio
+import hashlib
 from aionetiface import *
 from .mqtt_defs import *
 from .utils import *
@@ -19,52 +17,55 @@ from .mqtt_dispatch import *
 from .mqtt_reader import *
 
 async def mqtt_connect(self, keep_alive):
-    # Protocol-specific used for the session.
+    """
+    Connects to an MQTT server, validates the handshake, and 
+    subscribes to the client's ECDSA public key.
+    """
     self.client_id = rand_plain(15)
     route = self.nic.route(self.af)
+    
+    # Establish TCP Connection
     pipe = await Pipe(TCP, (self.host, self.port), route).connect()
-
-    buf = build_connect(
-        self.client_id,
-        keep_alive=keep_alive
-    )
-
-    await pipe.send(buf)
-
     if not pipe:
-        raise Exception("could not connect.")
-    
-    # CONNACK (fixed 4 bytes)
-    got = await asyncio.wait_for(pipe.recv_n(4), 4)
-    if got != b' \x02\x00\x00':
+        raise ConnectionError("TCP Connection failed to {}:{}".format(self.host, self.port))
+
+    # MQTT Handshake (CONNECT/CONNACK)
+    connect_buf = build_connect(self.client_id, keep_alive=keep_alive)
+    await pipe.send(connect_buf)
+
+    # Expecting a standard 4-byte CONNACK (0x20 0x02 0x00 0x00)
+    connack = await asyncio.wait_for(pipe.recv_n(4), timeout=4)
+    if connack != b' \x02\x00\x00':
         await pipe.close()
-        raise BadProtoResp("Invalid CON ACK")
-    
-    print("mqtt Connected success")
-    
-    # Start processing responses async from server.
+        raise BadProtoResp("Invalid MQTT CONNACK: {}".format(connack))
+
+    print("MQTT Connected: {}".format(self.client_id))
+
+    # Message Processing Setup
     self.pipe = pipe
+    
+    # Register the packet reader callback
+    pipe.add_msg_cb(lambda chunk, tup, p: mqtt_packet_reader(self, chunk, tup, p))
 
-    async def handle_chunks_async(chunk, client_tup, pipe):
-        return await mqtt_packet_reader(self, chunk, client_tup, pipe)
+    # Public Key Subscription
+    await subscribe_to_identity(self, pipe)
+    
+    return pipe
 
-    pipe.add_msg_cb(handle_chunks_async)
-
-    # Subscribe to messages to our own public key.
+async def subscribe_to_identity(self, pipe):
+    """Handles the subscription to the public key topic."""
     pub_hex = to_hs(self.kp.compact_public_key)
-    assert(len(pub_hex) == 66)
-
-    # Subscribe to pub key hex.
-    buf, packet_ack = self.subscribe(pub_hex)
+    
+    # Generate sub packet and the future tracking its acknowledgement
+    buf, packet_ack_future = self.subscribe(pub_hex)
     await pipe.send(buf)
 
-    # Wait for acknowledgement from server.
-    return_codes = await asyncio.wait_for(packet_ack, 4)
+    # Wait for SUBACK return codes (QoS confirmation)
+    return_codes = await asyncio.wait_for(packet_ack_future, timeout=4)
 
-    # Only accept QoS 1 -- errors or downgrades = no.
-    for _, code in enumerate(return_codes):
-        print("got return code = ", code)
-        if code != 1: # QoS 1
-            raise Exception("Invalid sub ack code " + str(code))
-
-    return pipe
+    # Only accept QoS 1; reject if server downgraded or errored
+    for code in return_codes:
+        if code != 1: 
+            raise Exception(
+                "Subscription failed. Expected QoS 1, got code: {}".format(code)
+            )

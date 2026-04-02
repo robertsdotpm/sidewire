@@ -11,7 +11,6 @@ the MQTT protocol possible:
 """
 
 import hashlib
-import asyncio
 from aionetiface import *
 from .mqtt_defs import *
 from .utils import *
