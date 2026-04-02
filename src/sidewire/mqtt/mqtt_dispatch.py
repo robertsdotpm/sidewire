@@ -84,7 +84,7 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
                         meta = client.msg_queues[msg_type][pipe_id_hex][seq_no]
                         #print("d", msg_type, " ", meta)
 
-                        if meta["acked"].done():
+                        if meta["app_ack"].done():
                             continue
 
                         # Don't rebroadcast if too soon.

@@ -53,7 +53,7 @@ class MQTTClient:
         self.kp = kp 
 
         # Low level
-        # [packet enum][packet id] = future
+        # [packet enum][packet id] = True
         self.packet_ids = {
             MQTTEnum.SUBACK: {},
             MQTTEnum.PUBACK: {},

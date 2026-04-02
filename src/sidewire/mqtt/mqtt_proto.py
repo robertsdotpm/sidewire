@@ -48,6 +48,8 @@ async def handle_broker_ack(client, packet):
     # SUBACK includes return codes in the body starting at index 2
     if packet.type == MQTTEnum.SUBACK:
         ack_future.set_result(packet.body[2:])
+    else:
+        ack_future.set_result(True)
 
 async def handle_publish(client, packet):
     """Parses incoming publish packets and verifies signatures."""
@@ -144,7 +146,11 @@ def process_app_ack(client, pipe_id_hex, seq_no_hex, src_pk_hex):
     
     if seq_no in msg_queue:
         msg_meta = msg_queue[seq_no]
-        # Security check: Ensure only the recipient can ACK
-        if msg_meta["dest_pk_hex"] == src_pk_hex and not msg_meta["acked"].done():
-            msg_meta["acked"].set_result(True)
+        if msg_meta["dest_pk_hex"] != src_pk_hex:
+            return
+        
+        if msg_meta["app_ack"].done():
+            return
+        
+        msg_meta["app_ack"].set_result(True)
 

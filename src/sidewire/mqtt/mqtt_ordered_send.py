@@ -76,18 +76,20 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
 
     # Queue message.
     now = asyncio.get_event_loop().time()
-    #packet_ack = asyncio.Future()
-    #packet_id = rand_b(2)
-    #print("use packet id = ", packet_id)
+    app_ack = asyncio.Future()
     packet_id, packet_ack = packet_ack_future(client.packet_ids, MQTTEnum.PUBACK)
     assert(type(packet_id) == bytes)
+    
     print("using packet id", packet_id)
     client.msg_queues[msg_type][pipe_id_hex][seq_no] = {
         "attempts": 0,
         "dest_pk_hex": dest_pk_hex,
         "seq_no": seq_no,
         "out": out,
-        "acked": packet_ack,
+
+        # Application-level ack, different from packet ack future.
+        "app_ack": app_ack,
+        "packet_ack": packet_ack,
         "updated": 0,
         "created": now,
         "packet_id": packet_id,
@@ -98,4 +100,4 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
     #    await client.publish(dest_pk_hex, out)
 
     # Caller can await ack if they want.
-    return out, packet_ack
+    return out, app_ack
