@@ -87,7 +87,8 @@ async def handle_mqtt_packet(client, packet):
                 return
             
             # Sets the return code only for SUBACK otherwise empty str.
-            ack_future.set_result(packet.body[2:])
+            if MQTTEnum.SUBACK == packet_type:
+                ack_future.set_result(packet.body[2:])
             #print("ack packet id", packet_id)
 
     # Handle ACK response.
@@ -151,13 +152,14 @@ async def handle_mqtt_packet(client, packet):
         )
 
         # Verify src pks signature is correct across signed msg.
-        is_valid_sig = vk.verify(
-            sig,
-            signed_msg,
-            sigdecode=util.sigdecode_string
-        )
+        try:
+            is_valid_sig = vk.verify(
+                sig,
+                signed_msg,
+                sigdecode=util.sigdecode_string
+            )
 
-        if not is_valid_sig:
+        except Exception:
             print("e: invalid sig for ", msg)
             return
         
@@ -199,6 +201,7 @@ async def handle_mqtt_packet(client, packet):
                     if old_seq_no < seq_no:
                         del client.msg_queues[MsgEnum.MSGACK][pipe_id_hex][old_seq_no]
                 """
+                
 
                 # This message has already been acked.
                 if seq_no in client.msg_queues[MsgEnum.MSGACK][pipe_id_hex]:
@@ -224,7 +227,12 @@ async def handle_mqtt_packet(client, packet):
             
             try:
                 if ack_already_exists:
-                    out = client.publish(meta["dest_pk_hex"], meta["out"], True)
+                    out = client.publish(
+                        meta["dest_pk_hex"],
+                        meta["out"],
+                        #meta["packet_id"],
+                        True
+                    )
                     await async_wrap_errors(
                         client.pipe.send(out)
                     )

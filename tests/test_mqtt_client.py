@@ -57,6 +57,8 @@ async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republ
         if not ack_await:
             await asyncio.sleep(2 * len(msg_list))
 
+    #await asyncio.sleep(5)
+
     # Cleanup.
     await client.close()
 
@@ -228,7 +230,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 
         #host_list = ["ovh1.p2pd.net"]
 
-        msg_list = ["first msg", "second msg"]
+        msg_list = ["first msg", "second msg", "third ms"]
 
         for host in host_list:
             print("testing ", host)
