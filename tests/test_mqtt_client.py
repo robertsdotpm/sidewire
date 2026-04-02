@@ -251,7 +251,10 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 # test send recv multi
 # Check other servers work
 # TODO: handle disconnect message.
+# TODO: refactor handle_mqqt... and connect with ai at least
+# Revist the concurrency idea after everyting
 # write new signal router
+# TODO: ordered send creates same future for both app level acks and broker acks
 
 
 if __name__ == '__main__':

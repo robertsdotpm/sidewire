@@ -14,9 +14,9 @@ from .mqtt_defs import *
 from .utils import *
 from ..signing import *
 from .mqtt_packet import *
-from .mqtt_proto import *
 from .mqtt_ordered_send import *
 from .mqtt_dispatch import *
+from .mqtt_reader import *
 
 async def mqtt_connect(self, keep_alive):
     # Protocol-specific used for the session.

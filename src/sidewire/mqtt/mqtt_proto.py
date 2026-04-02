@@ -18,289 +18,133 @@ from .utils import *
 from ..signing import *
 from .mqtt_packet import *
 
-# TCP streaming protocol handler for MQTT.
-async def mqtt_packet_reader(client, chunk, client_tup, pipe):
-    #print("got chunk = ", chunk)
-    if not chunk:
-        #print("not chunk")
-        return
-
-    # append incoming data
-    client.buf += chunk
-
-    # process as many complete packets as possible
-    while client.buf:
-        # need at least fixed header + 1 byte of remaining length
-        if len(client.buf) < 2:
-            print("need at least fixed header", client.buf)
-            return
-
-        # decode remaining length (starts at byte 1)
-        rem_len, consumed = mqtt_decode_varint(client.buf, 1)
-        if rem_len is None:
-            print("rem len is none", client.buf)
-            return
-
-        # total packet size = fixed header (1) + varint + payload
-        total_len = 1 + consumed + rem_len
-
-        # wait for full packet
-        if len(client.buf) < total_len:
-            print("wait for full packet", client.buf)
-            return
-
-        # extract packet
-        pkt_buf = client.buf[:total_len]
-        client.buf = client.buf[total_len:]
-
-        #print("pkt buf = ", pkt_buf)
-
-        # parse + handle
-        pkt = mqtt_parse_packet(pkt_buf)
-        await async_wrap_errors(
-            handle_mqtt_packet(client, pkt)
-        )
-
 async def handle_mqtt_packet(client, packet):
-    #packet.debug_print()
+    """Main router for incoming MQTT packets."""
+    if packet.type in (MQTTEnum.PUBACK, MQTTEnum.SUBACK):
+        await handle_broker_ack(client, packet)
 
-    #print("in handle mqtt pack")
+    elif packet.type == MQTTEnum.PUBLISH:
+        await handle_publish(client, packet)
 
-    # Main packets to 
-    for packet_type in (MQTTEnum.PUBACK, MQTTEnum.SUBACK):
-        if packet_type == packet.type:
-            #print("got mqtt ack")
-            #print("puback var header = ", packet.body)
-            #print("len body = ", len(packet.body))
-
-            #assert(len(packet.body) == 2)
-            # Strip packet_id from variable header.
-            packet_id = packet.body[:2]
-            if packet_id not in client.packet_ids[packet_type]:
-                print("e: packet id not in packet ids")
-                return
-
-            # Future to signal ack received for certain packets.
-            ack_future = client.packet_ids[packet_type][packet_id]
-            if ack_future.done():
-                print("e: ack future done.")
-                return
-            
-            # Sets the return code only for SUBACK otherwise empty str.
-            if MQTTEnum.SUBACK == packet_type:
-                ack_future.set_result(packet.body[2:])
-            #print("ack packet id", packet_id)
-
-    # Handle receive channel message.
-    if MQTTEnum.PUBLISH == packet.type:
-        print("got mqtt publish")
-        out = mqtt_parse_publish(packet)
-        print(out)
-
-        if not out:
-            print("e: invalid publish packet")
-            return
-        
-        topic, payload, packet_id = out
-
-        if packet_id:
-            # Construct a PUBACK (Type 0x40) + Length 2 + Packet ID
-            ack_packet = bytes([0x40, 0x02]) + packet_id
-            await client.pipe.send(ack_packet)
-            print("Sent MQTT PUBACK for ID:", packet_id)
-        
-        # Sanity checks match client formats.
-        assert(is_ascii(topic))
-        assert(is_ascii(payload))
-        assert(type(packet_id) == bytes)
-        
-        # Only interested in messages for our pub key.
-        compact_public_key = h_to_b(topic)
-        if compact_public_key != client.kp.compact_public_key:
-            print("e: Recv msg not meant for us.")
-
-        print("payload = ", payload)
-
-        # Unpack fields from payload.
-        src_pk_hex = payload[:66]; p = 66
-        sig = h_to_b(payload[p:p + 128]); p += 128
-        signed_msg = to_b(payload[p:])
-        pipe_id_hex = payload[p:p + 64]; p += 64
-        seq_no_hex = payload[p:p + 8]; p += 8
-        msg = payload[p:]
-
-        # Convert src pub hex into valid ECDSA pub key for verifying sig.
-        vk = VerifyingKey.from_string(
-            h_to_b(src_pk_hex),
-            curve=SECP256k1
-        )
-
-        # Verify src pks signature is correct across signed msg.
-        try:
-            is_valid_sig = vk.verify(
-                sig,
-                signed_msg,
-                sigdecode=util.sigdecode_string
-            )
-
-        except Exception:
-            print("e: invalid sig for ", msg)
-            return
-        
-        # The message we wish to send still has app-specific type.
-        # Allows it to be "ack" or "msg" to avoid endless loop.
-        msg_type = h_to_b(msg[:2])[0]
-        msg = msg[2:]
-        print("msg type = ", msg_type, " with ", seq_no_hex)
-
-        # If a regular message is received then send an ACK back to owner.
-        if MsgEnum.MSG == msg_type:
-            # Message-level uniqueness checks.
-            sent_msg_id = hashlib.sha256(to_b(msg)).hexdigest()
-            print("sent_msg_id", sent_msg_id)
-            if sent_msg_id in client.sent_msg_ids:
-                return
-            else:
-                client.sent_msg_ids[sent_msg_id] = 1
-            
-
-
-            print("sending back ack to src ", int(seq_no_hex, 16))
-            seq_no = int(seq_no_hex, 16)
-
-            # Delete all acks older than this seq_no.
-
-            """
-            If a message is sent back to us we may already have called
-            a func for the ack but they haven't received the ack.
-            Rather than wait for dispatcher, send an ack instantly here.
-            """
-            meta = None
-            if pipe_id_hex in client.msg_queues[MsgEnum.MSGACK]:
-                # Optimization: Delete all acks older than this seq_no.
-                for old_seq_no in list(client.msg_queues[MsgEnum.MSGACK][pipe_id_hex].keys()):
-                    if old_seq_no < seq_no:
-                        del client.msg_queues[MsgEnum.MSGACK][pipe_id_hex][old_seq_no]
-                
-                # This message has already been acked.
-                if seq_no in client.msg_queues[MsgEnum.MSGACK][pipe_id_hex]:
-                    meta = client.msg_queues[MsgEnum.MSGACK][pipe_id_hex][seq_no]
-                    out = client.publish(
-                        meta["dest_pk_hex"],
-                        meta["out"],
-                        meta["packet_id"],
-                        True
-                    )
-                    await async_wrap_errors(
-                        client.pipe.send(out)
-                    )
-                    return
-            """
-            Pass received messages to any registered message handlers.
-            Do it before sending back an ack to avoid race conditions in
-            receiving more messages before processing in done.
-            """
-            for msg_handler in client.msg_handlers:
-                await async_wrap_errors(
-                    msg_handler(
-                        msg,
-                        src_pk_hex,
-                        pipe_id_hex,
-                        client
-                    )
-                )
-
-            
-            try:
-                ret = client.send(
-                    "ack",
-                    src_pk_hex,
-                    pipe_id_hex,
-                    MsgEnum.MSGACK,
-                    seq_no=seq_no
-                )
-                print(ret)
-            except Exception:
-                log_exception()
-
-            print("after sent ack to src")
-            
-            return
-        
-        # Handle ACK response.
-        if MsgEnum.MSGACK == msg_type:
-            print("got msg ack")
-
-            # Message doesn't belong to any registered pipes.
-            if pipe_id_hex not in client.msg_queues[MsgEnum.MSG]:
-                print("e: msg ack: in valid pipe id")
-                return
-            
-            msg_queue = client.msg_queues[MsgEnum.MSG][pipe_id_hex]
-            
-            # Seq no overflows message queue.
-            seq_no = int(seq_no_hex, 16)
-            if seq_no > len(msg_queue):
-                print("e: msg ack seq no invalid")
-                return
-            
-            # Load meta data for msg waiting for ack.
-            msg_meta = msg_queue[seq_no]
-            if msg_meta["acked"].done():
-                print("e: msg meta acked done")
-                return
-            
-            # Only the dest for a message should be able to ACK it.
-            if msg_meta["dest_pk_hex"] != src_pk_hex:
-                print("e: msg ack dest pk hex not src pk hex")
-                return
-            
-            # Ack a message being sent to a host.
-            msg_meta["acked"].set_result(True)
-            return
-
-        print("signed message for us = ", msg)
-
-        #print("Got message at ", topic, " content = ", payload)
-
-    # Handle ping from server.
-    if MQTTEnum.PINGRESP == packet.type:
-        print("got ping response.")
+    elif packet.type == MQTTEnum.PINGRESP:
         await client.ping_handler()
+
+async def handle_broker_ack(client, packet):
+    """
+    Sets subscription success
+    No individual fields for ack futures from the broker so far.
+    
+    """
+    packet_id = packet.body[:2]
+    
+    if packet_id not in client.packet_ids[packet.type]:
+        #rint("e: packet id ")
         return
 
-def build_connect(client_id, keep_alive=60):
-    print("mqtt connect")
+    ack_future = client.packet_ids[packet.type][packet_id]
+    if ack_future.done():
+        return
+    
+    # SUBACK includes return codes in the body starting at index 2
+    if packet.type == MQTTEnum.SUBACK:
+        ack_future.set_result(packet.body[2:])
 
-    # proto name, proto level, clean session, keep alive 60s
-    vh = (
-        mqtt_enc_str("MQTT") + 
-        b"\x04" + 
-        b"\x02" + 
-        struct.pack("!H", keep_alive)
-    )
-    pl = mqtt_enc_str(client_id)
+async def handle_publish(client, packet):
+    """Parses incoming publish packets and verifies signatures."""
+    parsed = mqtt_parse_publish(packet)
+    if not parsed:
+        print("e: invalid publish packet")
+        return
+    
+    topic, payload, packet_id = parsed
 
-    # Full packet to send.
-    pkt = b"\x10" + mqtt_encode_varint(len(vh) + len(pl)) + vh + pl
-    return pkt
+    # 1. Immediate MQTT Ack to keep the broker's in-flight window open
+    if packet_id:
+        await send_mqtt_puback(client, packet_id)
 
-def build_subscribe(topic, packet_id):
-    vh = packet_id
-    pl = mqtt_enc_str(topic) + b"\x01"  # QoS 1
-    pkt = b"\x82" + mqtt_encode_varint(len(vh) + len(pl)) + vh + pl
-    return pkt
-    print("sub pkt = ", pkt)
+    # 2. Key Check: Is this message meant for us?
+    if h_to_b(topic) != client.kp.compact_public_key:
+        print("e: Recv msg not meant for us.")
+        return
 
-def build_publish(topic, payload, packet_id, dup=False):
-    topic_bytes = mqtt_enc_str(topic)
-    pl = topic_bytes + packet_id + to_b(payload)
+    # 3. Security: Verify ECDSA Signature
+    try:
+        # Layout: [src_pk(66)][sig(128)][signed_data...]
+        src_pk_hex = payload[:66]
+        sig = h_to_b(payload[66:194])
+        signed_msg_bytes = to_b(payload[194:])
+        
+        vk = VerifyingKey.from_string(h_to_b(src_pk_hex), curve=SECP256k1)
+        vk.verify(sig, signed_msg_bytes, sigdecode=util.sigdecode_string)
+    except Exception:
+        print("e: Signature verification failed")
+        return
 
-    # Base: PUBLISH + QoS1
-    header = 0x30 | (1 << 1)   # 0x32
+    # 4. Route to Application Logic
+    # msg_data Layout: [pipe_id(64)][seq(8)][type(2)][msg...]
+    msg_data = payload[194:]
+    pipe_id_hex = msg_data[:64]
+    seq_no_hex = msg_data[64:72]
+    app_payload = msg_data[72:]
+    
+    msg_type = h_to_b(app_payload[:2])[0]
+    actual_msg = app_payload[2:]
 
-    if dup:
-        header |= 0x08  # set DUP bit
+    if msg_type == MsgEnum.MSG:
+        await process_app_msg(client, actual_msg, src_pk_hex, pipe_id_hex, seq_no_hex)
+    elif msg_type == MsgEnum.MSGACK:
+        process_app_ack(client, pipe_id_hex, seq_no_hex, src_pk_hex)
 
-    pkt = bytes([header]) + mqtt_encode_varint(len(pl)) + pl
-    return pkt
+async def send_mqtt_puback(client, packet_id):
+    """Sends the 4-byte MQTT PUBACK to the broker."""
+    ack_packet = bytes([0x40, 0x02]) + packet_id
+    await client.pipe.send(ack_packet)
+
+async def process_app_msg(client, msg, src_pk_hex, pipe_id_hex, seq_no_hex):
+    """Processes a new application message and sends back a MSGACK."""
+    seq_no = int(seq_no_hex, 16)
+
+    # 1. Deduplication (Include seq_no in hash to allow identical text)
+    msg_hash = hashlib.sha256(to_b(msg + seq_no_hex)).hexdigest()
+    if msg_hash in client.sent_msg_ids:
+        return
+    client.sent_msg_ids[msg_hash] = 1
+
+    # 2. Cleanup old ACKs for this pipe
+    if pipe_id_hex in client.msg_queues[MsgEnum.MSGACK]:
+        queue = client.msg_queues[MsgEnum.MSGACK][pipe_id_hex]
+        for old_seq in list(queue.keys()):
+            if old_seq < seq_no:
+                del queue[old_seq]
+        
+        # 3. Optimization: If we already ACKed this specific seq, resend it
+        if seq_no in queue:
+            meta = queue[seq_no]
+            out = client.publish(meta["dest_pk_hex"], meta["out"], meta["packet_id"], True)
+            await async_wrap_errors(client.pipe.send(out))
+            return
+
+    # 4. Trigger registered app handlers
+    for msg_handler in client.msg_handlers:
+        await async_wrap_errors(msg_handler(msg, src_pk_hex, pipe_id_hex, client))
+
+    # 5. Send Application ACK back to sender
+    try:
+        client.send("ack", src_pk_hex, pipe_id_hex, MsgEnum.MSGACK, seq_no=seq_no)
+    except Exception:
+        log_exception()
+
+def process_app_ack(client, pipe_id_hex, seq_no_hex, src_pk_hex):
+    """Handles an application-level ACK to clear the sender's queue."""
+    if pipe_id_hex not in client.msg_queues[MsgEnum.MSG]:
+        return
+    
+    seq_no = int(seq_no_hex, 16)
+    msg_queue = client.msg_queues[MsgEnum.MSG][pipe_id_hex]
+    
+    if seq_no in msg_queue:
+        msg_meta = msg_queue[seq_no]
+        # Security check: Ensure only the recipient can ACK
+        if msg_meta["dest_pk_hex"] == src_pk_hex and not msg_meta["acked"].done():
+            msg_meta["acked"].set_result(True)
+
