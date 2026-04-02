@@ -53,6 +53,23 @@ class MQTTPacket:
         print(self.type)
         print(self.payload)
 
+def mqtt_parse_puback(packet):
+    """
+    Parses a PUBACK packet to extract the 2-byte Packet ID.
+    Expected packet.body is usually the 2-byte Variable Header.
+    """
+    body = packet.body
+    
+    # A PUBACK variable header must be exactly 2 bytes.
+    if len(body) < 2:
+        print("e: Malformed PUBACK - body too short")
+        return None
+
+    # Return the raw 2 bytes as the packet_id
+    packet_id = body[:2]
+    
+    return packet_id
+
 def mqtt_parse_publish(packet):
     body = packet.body
     offset = 0
@@ -61,6 +78,7 @@ def mqtt_parse_publish(packet):
     if len(body) < 2:
         return None
 
+    # We still need to unpack the length to know how far to read the topic
     tlen = struct.unpack("!H", body[offset:offset + 2])[0]
     offset += 2
 
@@ -71,17 +89,19 @@ def mqtt_parse_publish(packet):
     topic = to_s(body[offset:offset + tlen])
     offset += tlen
 
-    # QoS > 0 => packet identifier present
+    # QoS > 0 => 2-byte packet identifier is present
     qos = (packet.flags >> 1) & 0x03
     packet_id = None
 
     if qos > 0:
         if len(body) < offset + 2:
             return None
-        packet_id = struct.unpack("!H", body[offset:offset + 2])[0]
+        
+        # Sliced directly as bytes (2 bytes) instead of unpacking to int
+        packet_id = body[offset:offset + 2]
         offset += 2
 
-    # Payload
+    # Payload (everything remaining)
     payload = to_s(body[offset:])
 
     return topic, payload, packet_id

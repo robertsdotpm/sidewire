@@ -104,7 +104,13 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
 
                         # Broadcast new message.
                         #print("dispatching ", meta)
-                        buf, _ = client.publish(meta["dest_pk_hex"], meta["out"])
+                        buf = client.publish(
+                            meta["dest_pk_hex"], 
+                            meta["out"],
+                            meta["packet_id"],
+                            dup=True
+                        )
+
                         await async_wrap_errors(
                             client.pipe.send(buf)
                         )

@@ -17,9 +17,9 @@ def get_mqtt_client(server=MQTT_SERVER):
     client = MQTTClient(af, nic, server, kp)
     return client
 
-async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republish_duration=60, interval=2, keep_alive=30, timeout=5, ignore_timeout=False, min_sleep=0, ignore_acked=False, ack_await=True):
+async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republish_duration=60, interval=2, keep_alive=30, timeout=5, ignore_timeout=False, min_sleep=0, ignore_acked=False, ack_await=True, server=MQTT_SERVER):
     # Create client and install a message handler.
-    client = get_mqtt_client()
+    client = get_mqtt_client(server=server)
     client.add_msg_handler(msg_handler)
 
     # Connect client to server.
@@ -30,11 +30,13 @@ async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republ
     # Send a message.
     pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
     for buf in msg_list:
-        _, got_ack = client.send(
+        out, got_ack = client.send(
             buf,
             to_hs(client.kp.compact_public_key), # To self,
             pipe_id_hex
         )
+
+        print(out, id(got_ack))
 
         # Sleep timeout.
         if min_sleep:
@@ -46,15 +48,18 @@ async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republ
                 try:
                     await asyncio.wait_for(got_ack, timeout)
                 except asyncio.TimeoutError:
+                    print("timeout error")
                     pass
             else:
                 await asyncio.wait_for(got_ack, timeout)
+                print("wait for ack")
 
         if not ack_await:
             await asyncio.sleep(2 * len(msg_list))
 
     # Cleanup.
     await client.close()
+
 
 class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
     async def test_connect_single_success(self):
@@ -201,6 +206,44 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         await mqtt_send_msg_and_handle(msg_list, msg_handler, ack_await=False)
         print(recv_list)
         assert(recv_list == msg_list)
+
+    async def test_multiple_servers(self):
+        host_list = [
+            "test.mosquitto.org",
+            "broker.emqx.io",
+            "iot.coreflux.cloud",
+            "public.mqttserver.eu",
+            "broker.mqtt.cool",
+            #"broker.mqttdashboard.com",
+            "broker-cn.emqx.io",
+            "broker.bevywise.com",
+            #"mqtt.lonelybinary.com",
+            "broker.mqtt-dashboard.com",
+            "broker.hivemq.com",
+        ]
+
+        host_list = [
+            "broker.mqttdashboard.com"
+        ]
+
+        #host_list = ["ovh1.p2pd.net"]
+
+        msg_list = ["first msg", "second msg"]
+
+        for host in host_list:
+            print("testing ", host)
+            recv_list = []
+
+            async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+                recv_list.append(msg)
+
+            server = (host, 1883)
+            await mqtt_send_msg_and_handle(msg_list, msg_handler, server=server, interval=2, timeout=10)
+
+            # Part 1: no message duplication.
+            print(recv_list)
+            #assert(recv_list == msg_list)
+
 
 
 # test send recv multi

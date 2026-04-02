@@ -113,12 +113,12 @@ class MQTTClient:
         buf = build_subscribe(topic, packet_id)
         return buf, packet_ack
 
-    def publish(self, topic, payload):
+    def publish(self, topic, payload, packet_id, dup=False):
         assert(is_ascii(topic))
         assert(is_ascii(payload))
-        packet_id, packet_ack = packet_ack_future(self.packet_ids, MQTTEnum.PUBACK)
-        buf = build_publish(topic, payload, packet_id)
-        return buf, packet_ack
+        assert(type(packet_id) == bytes)
+        buf = build_publish(topic, payload, packet_id, dup)
+        return buf
     
     def send(self, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
         return ordered_ack_send(

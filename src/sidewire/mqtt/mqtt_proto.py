@@ -90,6 +90,22 @@ async def handle_mqtt_packet(client, packet):
             ack_future.set_result(packet.body[2:])
             #print("ack packet id", packet_id)
 
+    # Handle ACK response.
+    """
+    if MQTTEnum.PUBACK == packet.type:
+        print("got msg ack")
+
+        packet_id = mqtt_parse_puback(packet)
+
+        print("packet id = ")
+
+        if packet_id:
+            # Construct a PUBACK (Type 0x40) + Length 2 + Packet ID
+            ack_packet = bytes([0x40, 0x02]) + packet_id
+            await client.pipe.send(ack_packet)
+            print("Sent MQTT PUBACK for ID:", packet_id)
+    """
+
     # Handle receive channel message.
     if MQTTEnum.PUBLISH == packet.type:
         print("got mqtt publish")
@@ -101,10 +117,17 @@ async def handle_mqtt_packet(client, packet):
             return
         
         topic, payload, packet_id = out
+
+        if packet_id:
+            # Construct a PUBACK (Type 0x40) + Length 2 + Packet ID
+            ack_packet = bytes([0x40, 0x02]) + packet_id
+            await client.pipe.send(ack_packet)
+            print("Sent MQTT PUBACK for ID:", packet_id)
         
         # Sanity checks match client formats.
         assert(is_ascii(topic))
         assert(is_ascii(payload))
+        assert(type(packet_id) == bytes)
         
         # Only interested in messages for our pub key.
         compact_public_key = h_to_b(topic)
@@ -142,17 +165,19 @@ async def handle_mqtt_packet(client, packet):
         # Allows it to be "ack" or "msg" to avoid endless loop.
         msg_type = h_to_b(msg[:2])[0]
         msg = msg[2:]
-        print("msg type = ", msg_type)
+        print("msg type = ", msg_type, " with ", seq_no_hex)
 
         # If a regular message is received then send an ACK back to owner.
         if MsgEnum.MSG == msg_type:
             # Message-level uniqueness checks.
+            """
             sent_msg_id = hashlib.sha256(to_b(msg)).hexdigest()
             print("sent_msg_id", sent_msg_id)
             if sent_msg_id in client.sent_msg_ids:
                 return
             else:
                 client.sent_msg_ids[sent_msg_id] = 1
+            """
 
 
             print("sending back ack to src ", int(seq_no_hex, 16))
@@ -169,9 +194,11 @@ async def handle_mqtt_packet(client, packet):
             meta = None
             if pipe_id_hex in client.msg_queues[MsgEnum.MSGACK]:
                 # Optimization: Delete all acks older than this seq_no.
+                """
                 for old_seq_no in list(client.msg_queues[MsgEnum.MSGACK][pipe_id_hex].keys()):
                     if old_seq_no < seq_no:
                         del client.msg_queues[MsgEnum.MSGACK][pipe_id_hex][old_seq_no]
+                """
 
                 # This message has already been acked.
                 if seq_no in client.msg_queues[MsgEnum.MSGACK][pipe_id_hex]:
@@ -197,7 +224,7 @@ async def handle_mqtt_packet(client, packet):
             
             try:
                 if ack_already_exists:
-                    out = client.publish(meta["dest_pk_hex"], meta["out"])
+                    out = client.publish(meta["dest_pk_hex"], meta["out"], True)
                     await async_wrap_errors(
                         client.pipe.send(out)
                     )
@@ -283,13 +310,15 @@ def build_subscribe(topic, packet_id):
     return pkt
     print("sub pkt = ", pkt)
 
-def build_publish(topic, payload, packet_id):
-    # Build variable header:
-    # Topic (UTF-8 length-prefixed) + Packet Identifier (2 bytes)
+def build_publish(topic, payload, packet_id, dup=False):
     topic_bytes = mqtt_enc_str(topic)
     pl = topic_bytes + packet_id + to_b(payload)
 
-    # Fixed header:
-    # 0x32 = PUBLISH with QoS 1 (bits 1-2 set to 01)
-    pkt = b"\x32" + mqtt_encode_varint(len(pl)) + pl
+    # Base: PUBLISH + QoS1
+    header = 0x30 | (1 << 1)   # 0x32
+
+    if dup:
+        header |= 0x08  # set DUP bit
+
+    pkt = bytes([header]) + mqtt_encode_varint(len(pl)) + pl
     return pkt
