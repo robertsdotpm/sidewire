@@ -255,6 +255,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 # write new signal router
 # inc packet id from 1
 # Design a less agressive dispather for republish
+# Allow these tests to run for every server in order.
 
 
 if __name__ == '__main__':

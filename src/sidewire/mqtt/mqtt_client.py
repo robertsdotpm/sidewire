@@ -5,10 +5,16 @@ generic like a regular MQTT client. Instead it supports:
     - identity management -- clients subscribe to their own ECDSA pub key hex
     - authenticated messages -- all messages are signed by the sender, replies
     are sent back to originating pub key hex channel
-    - sequential messaging -- bare-bones MQTT doesn't have ordered messaging
-    this allows MQTT to be multi-plexed and into ordered pipes
     - reliable delivery -- application level acks allow message delivery to be
     confirmed before moving to next message
+    - sequential messaging -- bare-bones MQTT servers vary; handling this at the
+    application level makes the code portable across servers and reliable 
+
+Technical notes:
+    - connect clean session = True -- no old stored messages used
+    - publish "dup" flag = False
+    - no reused packet IDs for publish messages
+    - delivery and ordering handled by application-level acks
 
 The main class interface is designed to be sync without any network I/O. All I/O
 is instead confined to a background message dispatcher written to be simple. This
