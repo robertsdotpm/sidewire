@@ -216,19 +216,21 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             "iot.coreflux.cloud",
             "public.mqttserver.eu",
             "broker.mqtt.cool",
-            #"broker.mqttdashboard.com",
+            "broker.mqttdashboard.com",
             "broker-cn.emqx.io",
             "broker.bevywise.com",
-            #"mqtt.lonelybinary.com",
+            #"mqtt.lonelybinary.com", down
             "broker.mqtt-dashboard.com",
             "broker.hivemq.com",
         ]
 
+        """
         host_list = [
             "broker.mqttdashboard.com"
         ]
 
         #host_list = ["ovh1.p2pd.net"]
+        """
 
         msg_list = ["first msg", "second msg", "third"]
 
@@ -244,7 +246,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 
             # Part 1: no message duplication.
             print(recv_list)
-            #assert(recv_list == msg_list)
+            assert(recv_list == msg_list)
 
 
 

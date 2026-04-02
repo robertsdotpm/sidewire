@@ -45,7 +45,11 @@ async def mqtt_connect(self, keep_alive):
     self.pipe = pipe
     
     # Register the packet reader callback
-    pipe.add_msg_cb(lambda chunk, tup, p: mqtt_packet_reader(self, chunk, tup, p))
+    async def handle_chunks_async(chunk, client_tup, pipe):
+        return await mqtt_packet_reader(self, chunk, client_tup, pipe)
+    
+    # Add handler to read chunks.
+    pipe.add_msg_cb(handle_chunks_async)
 
     # Public Key Subscription
     await subscribe_to_identity(self, pipe)
