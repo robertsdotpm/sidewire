@@ -121,7 +121,7 @@ async def process_app_msg(client, msg, src_pk_hex, pipe_id_hex, seq_no_hex):
         # 3. Optimization: If we already ACKed this specific seq, resend it
         if seq_no in queue:
             meta = queue[seq_no]
-            out = client.publish(meta["dest_pk_hex"], meta["out"], meta["packet_id"], True)
+            out = client.publish(meta["dest_pk_hex"], meta["out"]) # meta["packet_id"], True)
             await async_wrap_errors(client.pipe.send(out))
             return
 

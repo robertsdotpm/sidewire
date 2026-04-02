@@ -107,8 +107,8 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
                         buf = client.publish(
                             meta["dest_pk_hex"], 
                             meta["out"],
-                            meta["packet_id"],
-                            dup=True
+                            #meta["packet_id"],
+                            #dup=True
                         )
 
                         await async_wrap_errors(

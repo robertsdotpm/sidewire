@@ -17,7 +17,7 @@ def get_mqtt_client(server=MQTT_SERVER):
     client = MQTTClient(af, nic, server, kp)
     return client
 
-async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republish_duration=60, interval=2, keep_alive=30, timeout=5, ignore_timeout=False, min_sleep=0, ignore_acked=False, ack_await=True, server=MQTT_SERVER):
+async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republish_duration=60, interval=5, keep_alive=30, timeout=5, ignore_timeout=False, min_sleep=0, ignore_acked=False, ack_await=True, server=MQTT_SERVER):
     # Create client and install a message handler.
     client = get_mqtt_client(server=server)
     client.add_msg_handler(msg_handler)
@@ -151,7 +151,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 
     """
     async def test_broken_receiver(self):
-        msg_list = ["first msg"]
+        msg_list = ["first msg", "second message"]
         recv_list = []
 
         async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
@@ -224,13 +224,13 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             "broker.hivemq.com",
         ]
 
-        """
+        
         host_list = [
             "broker.mqttdashboard.com"
         ]
 
         #host_list = ["ovh1.p2pd.net"]
-        """
+        
 
         msg_list = ["first msg", "second msg", "third"]
 
@@ -242,21 +242,19 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
                 recv_list.append(msg)
 
             server = (host, 1883)
-            await mqtt_send_msg_and_handle(msg_list, msg_handler, server=server, interval=2, timeout=10)
-
+            await mqtt_send_msg_and_handle(msg_list, msg_handler, server=server, interval=5, timeout=3)
             # Part 1: no message duplication.
             print(recv_list)
             assert(recv_list == msg_list)
 
 
 
-# test send recv multi
-# Check other servers work
 # TODO: handle disconnect message.
-# TODO: refactor handle_mqqt... and connect with ai at least
+# fix formatting
 # Revist the concurrency idea after everyting
 # write new signal router
-# TODO: ordered send creates same future for both app level acks and broker acks
+# inc packet id from 1
+# Design a less agressive dispather for republish
 
 
 if __name__ == '__main__':

@@ -84,7 +84,7 @@ class MQTTClient:
     async def ping_handler(self):
         pass
     
-    async def connect(self, republish_duration=60, interval=1, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False, reconnect_delay=0):
+    async def connect(self, republish_duration=60, interval=5, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False, reconnect_delay=0):
         pipe = await mqtt_connect(self, keep_alive)
         if pipe:
             """
@@ -113,7 +113,7 @@ class MQTTClient:
         buf = build_subscribe(topic, packet_id)
         return buf, packet_ack
 
-    def publish(self, topic, payload, packet_id, dup=False):
+    def publish(self, topic, payload, packet_id=b"", dup=False):
         assert(is_ascii(topic))
         assert(is_ascii(payload))
         assert(type(packet_id) == bytes)
