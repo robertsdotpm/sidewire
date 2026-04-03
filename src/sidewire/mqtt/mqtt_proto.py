@@ -164,4 +164,3 @@ def process_app_ack(client, pipe_id_hex, seq_no_hex, src_pk_hex):
             return
         
         msg_meta["app_ack"].set_result(True)
-

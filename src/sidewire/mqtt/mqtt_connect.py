@@ -74,3 +74,30 @@ async def subscribe_to_identity(self, pipe):
             raise Exception(
                 "Subscription failed. Expected QoS 1, got code: {}".format(code)
             )
+        
+# Ensure a connection exists before running dispatcher.
+async def ensure_connection(client, keep_alive):
+    while not client.is_closed.is_set():
+        # connection_lost set.
+        if client.pipe and not client.pipe.on_close.is_set():
+            return True
+
+        print("Got con lost event")
+        # Close old handle.
+        if client.pipe:
+            await client.pipe.close(force=True)
+
+        # Connect a new one.
+        try:
+            pipe = await mqtt_connect(client, keep_alive)
+            if pipe:
+                return True
+        except (asyncio.TimeoutError, ConnectionError, OSError):
+            # Server still down.
+            pass
+
+        # Avoid immediately reconnecting to avoid DoS.
+        print("In disconnect loop?")
+        await asyncio.sleep(60)
+
+    return False
