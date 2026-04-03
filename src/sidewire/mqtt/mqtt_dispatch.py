@@ -104,10 +104,11 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
 
                         # Broadcast new message.
                         #print("dispatching ", meta)
+                        packet_id, packet_ack = packet_ack_future(client, MQTTEnum.PUBACK)
                         buf = client.publish(
                             meta["dest_pk_hex"], 
                             meta["out"],
-                            #meta["packet_id"],
+                            packet_id,
                             #dup=True
                         )
 

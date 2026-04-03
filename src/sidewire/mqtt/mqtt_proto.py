@@ -50,6 +50,14 @@ async def handle_broker_ack(client, packet):
     else:
         ack_future.set_result(True)
 
+    """
+    I think it should be fine to delete the packet ID reference now.
+    Any futures being awaited will have a reference from the caller
+    so they won't just be garbage collected. This prevents all the
+    packet IDs from being filled up and used.
+    """
+    del client.packet_ids[packet.type][packet_id]
+
 async def handle_publish(client, packet):
     """Parses incoming publish packets and verifies signatures."""
     parsed = mqtt_parse_publish(packet)
@@ -121,7 +129,13 @@ async def process_app_msg(client, msg, src_pk_hex, pipe_id_hex, seq_no_hex):
         # 3. Optimization: If we already ACKed this specific seq, resend it
         if seq_no in queue:
             meta = queue[seq_no]
-            out = client.publish(meta["dest_pk_hex"], meta["out"]) # meta["packet_id"], True)
+            packet_id, packet_ack = packet_ack_future(client, MQTTEnum.PUBACK)
+            out = client.publish(
+                meta["dest_pk_hex"], 
+                meta["out"],
+                packet_id,
+            )
+
             await async_wrap_errors(client.pipe.send(out))
             return
 

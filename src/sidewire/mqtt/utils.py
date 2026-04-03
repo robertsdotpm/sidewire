@@ -38,16 +38,8 @@ def mqtt_enc_str(s):
     b = to_b(s)
     return struct.pack("!H", len(b)) + b
 
-def get_unique_packet_id(packet_ids, packet_type):
-    for _ in range(0, 10000):
-        packet_id = rand_b(2)
-        if packet_id not in packet_ids[packet_type]:
-            return packet_id
-        
-    raise Exception("Could not get unique packet id")
-
-def packet_ack_future(packet_ids, packet_type):
-    packet_id = get_unique_packet_id(packet_ids, packet_type)
+def packet_ack_future(client, packet_type):
+    packet_id = client.get_packet_id()
     packet_ack = asyncio.Future()
-    packet_ids[packet_type][packet_id] = packet_ack
+    client.packet_ids[packet_type][packet_id] = packet_ack
     return packet_id, packet_ack

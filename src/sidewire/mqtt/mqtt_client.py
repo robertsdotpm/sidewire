@@ -11,10 +11,17 @@ generic like a regular MQTT client. Instead it supports:
     application level makes the code portable across servers and reliable 
 
 Technical notes:
+    - client ID is intentionally random each time
     - connect clean session = True -- no old stored messages used
     - publish "dup" flag = False
     - no reused packet IDs for publish messages
-    - delivery and ordering handled by application-level acks
+    - delivery and ordering handled by application-level ack
+
+Using the above settings means that message retransmittion is no longer managed
+by the server and ends up entirely managed by the client. The MQTT server becomes
+a simple proxy in such a mode. But you can build a more reliable, deterministic,
+system on top of it without hidden edge-cases that might exist (e.g. storage
+limits, protocol implementation differences, and so on.)
 
 The main class interface is designed to be sync without any network I/O. All I/O
 is instead confined to a background message dispatcher written to be simple. This
@@ -80,9 +87,16 @@ class MQTTClient:
         # Dispatcher task.
         self.is_closed = asyncio.Event()
         self.dispatcher_task = None
+        self.packet_id = 0
 
     def __await__(self):
         return self.connect().__await__()
+    
+    def get_packet_id(self):
+        while True:
+            self.packet_id = (self.packet_id % 65535) + 1
+            if self.packet_id not in self.packet_ids:
+                return struct.pack(">H", self.packet_id)
     
     def add_msg_handler(self, msg_handler):
         self.msg_handlers.append(msg_handler)
@@ -115,11 +129,11 @@ class MQTTClient:
 
     def subscribe(self, topic, timeout=4):
         assert(type(topic) == str)
-        packet_id, packet_ack = packet_ack_future(self.packet_ids, MQTTEnum.SUBACK)
+        packet_id, packet_ack = packet_ack_future(self, MQTTEnum.SUBACK)
         buf = build_subscribe(topic, packet_id)
         return buf, packet_ack
 
-    def publish(self, topic, payload, packet_id=b"", dup=False):
+    def publish(self, topic, payload, packet_id, dup=False):
         assert(is_ascii(topic))
         assert(is_ascii(payload))
         assert(type(packet_id) == bytes)
