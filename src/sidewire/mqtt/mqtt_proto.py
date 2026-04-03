@@ -129,11 +129,9 @@ async def process_app_msg(client, msg, src_pk_hex, pipe_id_hex, seq_no_hex):
         # 3. Optimization: If we already ACKed this specific seq, resend it
         if seq_no in queue:
             meta = queue[seq_no]
-            packet_id, packet_ack = packet_ack_future(client, MQTTEnum.PUBACK)
-            out = client.publish(
+            out, packet_ack = client.publish(
                 meta["dest_pk_hex"], 
                 meta["out"],
-                packet_id,
             )
 
             await async_wrap_errors(client.pipe.send(out))

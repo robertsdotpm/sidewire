@@ -249,12 +249,12 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 
 
 
-# TODO: handle disconnect message.
+
 # fix formatting
-# Revist the concurrency idea after everyting
-# write new signal router
 # Design a less agressive dispather for republish
 # Allow these tests to run for every server in order.
+# Revist the concurrency idea after everyting
+# write new signal router
 
 
 if __name__ == '__main__':

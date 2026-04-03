@@ -50,6 +50,7 @@ from .mqtt_ordered_send import *
 from .mqtt_dispatch import *
 from .mqtt_connect import *
 
+# EG: IP4, Interface("default"), ("test.mosquitto.org", 1883), Signing.keypair()
 class MQTTClient:
     def __init__(self, af, nic, dest, kp):
         # Addressing info for connected MQTT server.
@@ -58,21 +59,15 @@ class MQTTClient:
         self.dest = dest
         self.host, self.port = dest
 
-        # Active TCP con and buffered reader.
-        self.pipe = None
-        self.buf = b""
-
         # ECDSA key pair for signing high-level sequenced messages over MQTT.
         self.kp = kp 
 
-        # Low level
-        # [packet enum][packet id] = True
-        self.packet_ids = {
-            MQTTEnum.SUBACK: {},
-            MQTTEnum.PUBACK: {},
-        }
+        # Handle received messages.
+        self.msg_handlers = []
 
         # Plugin message system [enum][pipe id][seq_no] = meta
+        # Used by the dispatcher task to republish messages.
+        # The packet handler code in proto also sets futures here (app level ACKs.)
         self.msg_queues = {
             MsgEnum.MSG: {},
             MsgEnum.MSGACK: {},
@@ -81,29 +76,45 @@ class MQTTClient:
         # Msg part unpacked from the full proto over publish.
         self.sent_msg_ids = {}
 
-        # Handle received messages.
-        self.msg_handlers = []
+        # Record in-flight packets by IDs that map to futures on server ack.
+        # [packet enum][packet id] = Future
+        self.packet_ids = {
+            MQTTEnum.SUBACK: {},
+            MQTTEnum.PUBACK: {},
+        }
 
-        # Dispatcher task.
-        self.is_closed = asyncio.Event()
+        # Other internal state.
         self.dispatcher_task = None
         self.packet_id = 0
 
+        # Connection state.
+        self.is_closed = asyncio.Event()
+        self.pipe = None
+        self.buf = b""
+
+    # Allow awaiting on the class object directly.
     def __await__(self):
         return self.connect().__await__()
     
+    # Simple increasing packet ID with uniqueness checks.
+    # Avoids zero which is an invalid packet ID.
     def get_packet_id(self):
         while True:
             self.packet_id = (self.packet_id % 65535) + 1
+            assert(self.packet_id)
             if self.packet_id not in self.packet_ids:
                 return struct.pack(">H", self.packet_id)
     
+    # High-level message handlers handle messages received from other class.send()ers.
     def add_msg_handler(self, msg_handler):
         self.msg_handlers.append(msg_handler)
 
+    # Mostly used to test ping resps are received.
     async def ping_handler(self):
         pass
     
+    # Connect to MQTT server and subscribe to our own pub key hex topic.
+    # Also will start a background task that dispatches messages from self.send.
     async def connect(self, republish_duration=60, interval=5, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False, reconnect_delay=0):
         pipe = await mqtt_connect(self, keep_alive)
         if pipe:
@@ -127,19 +138,26 @@ class MQTTClient:
 
         return pipe
 
+    # Internal: used to subscribe to own pub key hex.
+    # Returns packet and future to await ack for the packet from the server.
     def subscribe(self, topic, timeout=4):
         assert(type(topic) == str)
         packet_id, packet_ack = packet_ack_future(self, MQTTEnum.SUBACK)
         buf = build_subscribe(topic, packet_id)
         return buf, packet_ack
 
-    def publish(self, topic, payload, packet_id, dup=False):
+    # Internal: used to publish signed messages to pub key hashed topics.
+    # Returns packet and future to await ack for the packet from the server.
+    def publish(self, topic, payload, dup=False):
         assert(is_ascii(topic))
         assert(is_ascii(payload))
-        assert(type(packet_id) == bytes)
+        packet_id, packet_ack = packet_ack_future(self, MQTTEnum.PUBACK)
         buf = build_publish(topic, payload, packet_id, dup)
-        return buf
+        return buf, packet_ack
     
+    # High level function: send a message to a dest pub key hash (topic.)
+    # Puts the msg in a sequenced queue called pipe_id_hex to be republished.
+    # A background dispatcher task loops over these queues to repub messages.
     def send(self, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
         return ordered_ack_send(
             self,
@@ -150,19 +168,29 @@ class MQTTClient:
             seq_no
         )
     
+    # Cleanly disconnect from MQTT server.
     async def close(self):
+        # Already closed.
         if self.is_closed.is_set():
             return
         
+        # Indicate closed to block other callers.
         self.is_closed.set()
+
+        # Cancel message dispatcher bg task.
         if self.dispatcher_task:
             self.dispatcher_task.cancel()
             self.dispatcher_task = None
 
+        # Cleanly disconnect from the MQTT server.
+        # The pipe sends disconnect, does shutdown, then close.
         if self.pipe:
+            # Disconnect packet.
+            await self.pipe.send(bytes([0xE0, 0x00]))
             await self.pipe.close()
             self.pipe = None
 
+# Example usage using -m
 async def workspace():
     #m = MQTTClient(IP4, nic, node_id, ("test.mosquitto.org", 1883))
     nic = Interface("default")

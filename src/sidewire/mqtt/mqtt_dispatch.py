@@ -22,17 +22,7 @@ for ...
 
 ... without awaiting the returned ack means that event handlers passed to send are
 run in a random order due to race conditions.
-"""
 
-import time
-import asyncio
-import math
-from aionetiface import *
-from .mqtt_connect import *
-from .mqtt_packet import *
-
-
-"""
 Dispatcher loop is not optimized. It's not going to be used to send thousands
 of msgs a second but a few messages for signaling to form connections.
 Messages sent with this are minimal.
@@ -40,92 +30,125 @@ Messages sent with this are minimal.
 Can potentially go wrong if both sides use different keep_alive intervals
 and using attempts based on the formula for interval and keep alive checks.
 """
+
+import asyncio
+from aionetiface import *
+from .mqtt_connect import *
+from .mqtt_packet import *
+
+async def ensure_connection(client, keep_alive):
+    """
+    Event is set when connect_lost in protocol occurs.
+    Loop forever until connection succeeds.
+    """
+    while not client.is_closed.is_set():
+        if client.pipe and not client.pipe.on_close.is_set():
+            return True
+
+        print("Got con lost event")
+        # Close old handle.
+        if client.pipe:
+            await client.pipe.close(force=True)
+
+        # Connect a new one.
+        try:
+            pipe = await mqtt_connect(client, keep_alive)
+            if pipe:
+                return True
+        except (asyncio.TimeoutError, ConnectionError, OSError):
+            # Server still down.
+            pass
+
+        # Avoid immediately reconnecting to avoid DoS.
+        print("In disconnect loop?")
+        await asyncio.sleep(60)
+    return False
+
+def iter_all_messages(msg_queues):
+    """Flattens the 3-level nested dict into a single generator."""
+    # Queues are split by app msg type: MSG or MSGACK.
+    for msg_type in msg_queues:
+        # Each plugin instance has a unique pipe_id.
+        for pipe_id_hex in list(msg_queues[msg_type].keys()):
+            # Messages are further indexed by sequence (order.)
+            queue = msg_queues[msg_type][pipe_id_hex]
+            for seq_no in sorted(queue.keys()):
+                yield queue[seq_no]
+
+async def process_meta(client, meta, now, interval, republish_duration):
+    """Logic for each individual meta part."""
+    # Message has already been acked.
+    if meta["app_ack"].done():
+        return
+
+    # Don't rebroadcast if too soon.
+    interval_elapsed = now - meta["updated"]
+    if interval_elapsed < interval:
+        return
+
+    # Republish duration exceeded.
+    total_elapsed = now - meta["created"]
+    if total_elapsed >= republish_duration:
+        return
+
+    # Increase state counters.
+    meta["updated"] = now
+
+    # Broadcast new message.
+    buf, packet_ack = client.publish(
+        meta["dest_pk_hex"], 
+        meta["out"],
+    )
+
+    await async_wrap_errors(
+        client.pipe.send(buf)
+    )
+
+async def check_and_ping(client, last_ping, keep_alive):
+    """Send ping to server every so often."""
+    now = asyncio.get_event_loop().time()
+    if now - last_ping >= keep_alive:
+        req = MQTTPacket(MQTTEnum.PINGREQ)
+        buf = req.build()
+        await async_wrap_errors(client.pipe.send(buf))
+        return now  # Return new last_ping time
+    return last_ping
+
+
+"""
+Putting the reconnect loop at the start helps ensure that later code
+here that calls client.pipe.send succeeds, otherwise client.pipe is
+set to None and send won't exist yet.
+
+Pipe.send on broken con ends up calling connection_lost
+to set on_close for the pipe event.
+"""
 async def dispatcher(client, republish_duration, interval, keep_alive, ignore_acked=False, reconnect_delay=0):
     republish_duration = max(republish_duration, 2 * keep_alive)
     last_ping = asyncio.get_event_loop().time()
     try:
-        """
-        Putting the reconnect loop at the start helps ensure that later code
-        here that calls client.pipe.send succeeds, otherwise client.pipe is
-        set to None and send won't exist yet.
-
-        Pipe.send on broken con ends up calling connection_lost
-        to set on_close for the pipe event.
-        """
+        # Loop forever until is close is set or task cancelled.
         while not client.is_closed.is_set():
+            # Conditional used for testing.
             if reconnect_delay:
                 await asyncio.sleep(reconnect_delay)
 
-            if client.pipe is None or client.pipe.on_close.is_set():
-                print("Got con lost event")
-                while not client.is_closed.is_set():
-                    # Close old handle.
-                    if client.pipe:
-                        await client.pipe.close(force=True)
+            # Ensure pipe is alive before attempting to send.
+            if not await ensure_connection(client, keep_alive):
+                break
 
-                    # Connect a new one.
-                    try:
-                        pipe = await mqtt_connect(client, keep_alive)
-                        if pipe:
-                            break
-                    except (asyncio.TimeoutError, ConnectionError, OSError):
-                        # Server still down.
-                        pass
+            now = asyncio.get_event_loop().time()
 
-                    print("In disconnect loop?")
-                    await asyncio.sleep(60)
-
-            # Process messages in various queues.
-            for msg_type in client.msg_queues:
-                for pipe_id_hex in list(client.msg_queues[msg_type].keys()):
-                    seq_nos = client.msg_queues[msg_type][pipe_id_hex].keys()
-                    now = asyncio.get_event_loop().time()
-                    for seq_no in sorted(list(seq_nos)):
-                        meta = client.msg_queues[msg_type][pipe_id_hex][seq_no]
-                        #print("d", msg_type, " ", meta)
-
-                        if meta["app_ack"].done():
-                            continue
-
-                        # Don't rebroadcast if too soon.
-                        interval_elapsed = now - meta["updated"]
-                        if interval_elapsed < interval:
-                            #print("ed: elapsed < interval", elapsed, " ", interval)
-                            continue
-
-                        # Republish duration exceeded.
-                        total_elapsed = now - meta["created"]
-                        if total_elapsed >= republish_duration:
-                            #print("ed: attempts >= attempts")
-                            continue
-
-                        # Increase state counters.
-                        meta["updated"] = now
-
-                        # Broadcast new message.
-                        #print("dispatching ", meta)
-                        packet_id, packet_ack = packet_ack_future(client, MQTTEnum.PUBACK)
-                        buf = client.publish(
-                            meta["dest_pk_hex"], 
-                            meta["out"],
-                            packet_id,
-                            #dup=True
-                        )
-
-                        await async_wrap_errors(
-                            client.pipe.send(buf)
-                        )
+            # Process all messages in the queues.
+            for meta in iter_all_messages(client.msg_queues):
+                await process_meta(client, meta, now, interval, republish_duration)
 
             # Used to know when to send a ping.
             await asyncio.sleep(0.5)
 
-            # Send ping to server every so often.
-            now = asyncio.get_event_loop().time()
-            if now - last_ping >= keep_alive:
-                last_ping = now
-                req = MQTTPacket(MQTTEnum.PINGREQ)
-                buf = req.build()
-                await async_wrap_errors(client.pipe.send(buf))
+            # Keep-alive heartbeat.
+            last_ping = await check_and_ping(client, last_ping, keep_alive)
+
     except asyncio.CancelledError:
         print("dispatcher exited.")
         # Cleanup handled by caller.

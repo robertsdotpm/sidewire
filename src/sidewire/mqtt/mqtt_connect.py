@@ -54,6 +54,7 @@ async def mqtt_connect(self, keep_alive):
     # Public Key Subscription
     await subscribe_to_identity(self, pipe)
     
+    # Return connected pipe.
     return pipe
 
 async def subscribe_to_identity(self, pipe):
