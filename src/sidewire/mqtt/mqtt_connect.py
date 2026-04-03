@@ -16,12 +16,15 @@ from .mqtt_ordered_send import *
 from .mqtt_dispatch import *
 from .mqtt_reader import *
 
+# Connect to MQTT server, subcribe to our public key hex.
+# Setup stream-based packet reconstruction handler.
 async def mqtt_connect(self, keep_alive):
     """
-    Connects to an MQTT server, validates the handshake, and 
-    subscribes to the client's ECDSA public key.
+    In MQTT the client ID determines offline saved message queues.
+    Normally MQTT clients reuse IDs to get offline messages but here since
+    the software manages message delivery itself a rand id ensures a fresh state.
     """
-    self.client_id = rand_plain(15)
+    self.client_id = self.client_id or rand_plain(15)
     route = self.nic.route(self.af)
     
     # Establish TCP Connection
@@ -57,8 +60,9 @@ async def mqtt_connect(self, keep_alive):
     # Return connected pipe.
     return pipe
 
+# Handles the subscription to the public key topic
 async def subscribe_to_identity(self, pipe):
-    """Handles the subscription to the public key topic."""
+    # Convert 33 byte compact pub key to hex.
     pub_hex = to_hs(self.kp.compact_public_key)
     
     # Generate sub packet and the future tracking its acknowledgement
@@ -76,18 +80,24 @@ async def subscribe_to_identity(self, pipe):
             )
         
 # Ensure a connection exists before running dispatcher.
-async def ensure_connection(client, keep_alive):
+async def reconnect_loop(client, keep_alive):
+    # connection_lost set.
     while not client.is_closed.is_set():
         # connection_lost set.
         if client.pipe and not client.pipe.on_close.is_set():
-            return True
+            return
 
         print("Got con lost event")
         # Close old handle.
         if client.pipe:
-            await client.pipe.close(force=True)
+            # Cleanup a past client -- close its message dispatcher.
+            await client.pipe.close()
 
-        # Connect a new one.
+        # Reset the old session state.
+        # (packet ids, buf, packet id counter, closed event.)
+        client.reset_session_state()
+
+        # Connect a new pipe.
         try:
             pipe = await mqtt_connect(client, keep_alive)
             if pipe:
@@ -99,5 +109,3 @@ async def ensure_connection(client, keep_alive):
         # Avoid immediately reconnecting to avoid DoS.
         print("In disconnect loop?")
         await asyncio.sleep(60)
-
-    return False

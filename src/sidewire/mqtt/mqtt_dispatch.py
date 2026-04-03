@@ -13,13 +13,13 @@ initialized and handling broken connections via a connection_lost callback.
 Users should ensure both sides use consistent keep_alive intervals to avoid 
 synchronization failures.
 """
-
 import asyncio
 from aionetiface import *
 from .mqtt_connect import *
 from .mqtt_packet import *
 from .utils import *
 
+# Cleanup handled by mqtt_client.close.
 async def dispatcher(client, republish_duration, interval, keep_alive, ignore_acked=False, reconnect_delay=0):
     republish_duration = max(republish_duration, 2 * keep_alive)
     last_ping = asyncio.get_event_loop().time()
@@ -31,13 +31,19 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
                 await asyncio.sleep(reconnect_delay)
 
             # Ensure pipe is alive before attempting to send.
-            if not await ensure_connection(client, keep_alive):
-                break
+            await reconnect_loop(client, keep_alive)
 
             # Process all messages in the queues.
             now = asyncio.get_event_loop().time()
             for meta in iter_all_messages(client.msg_queues):
-                await process_meta(client, meta, now, interval, republish_duration)
+                await republish_meta(
+                    client, 
+                    meta, 
+                    now, 
+                    interval, 
+                    republish_duration,
+                    ignore_acked,
+                )
 
             # Used to know when to send a ping.
             await asyncio.sleep(0.5)
@@ -46,19 +52,18 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
             last_ping, ping_buf = build_ping(last_ping, keep_alive)
             if ping_buf: 
                 await client.pipe.send(ping_buf)
-
     except asyncio.CancelledError:
         print("dispatcher exited.")
-        # Cleanup handled by caller.
     except Exception:
         log_exception()
 
     print("dispatcher exited cleanly.")
 
-async def process_meta(client, meta, now, interval, republish_duration):
+async def republish_meta(client, meta, now, interval, republish_duration, ignore_acked):
     # Message has already been acked.
-    if meta["app_ack"].done():
-        return
+    if ignore_acked:
+        if meta["app_ack"].done():
+            return
 
     # Don't rebroadcast if too soon.
     interval_elapsed = now - meta["updated"]
@@ -73,12 +78,13 @@ async def process_meta(client, meta, now, interval, republish_duration):
     # Increase state counters.
     meta["updated"] = now
 
-    # Broadcast new message.
+    # Create publish packet to send.
     buf, packet_ack = client.publish(
         meta["dest_pk_hex"], 
         meta["out"],
     )
 
+    # Broadcast new message.
     await async_wrap_errors(
         client.pipe.send(buf)
     )

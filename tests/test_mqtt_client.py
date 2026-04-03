@@ -248,13 +248,13 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             assert(recv_list == msg_list)
 
 
-
-
 # fix formatting
 # Design a less agressive dispather for republish
+# Ensure tests still pass
 # Allow these tests to run for every server in order.
 # Revist the concurrency idea after everyting
 # write new signal router
+
 
 
 if __name__ == '__main__':

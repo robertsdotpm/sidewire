@@ -84,17 +84,43 @@ class MQTTClient:
         }
 
         # Other internal state.
-        self.dispatcher_task = None
         self.packet_id = 0
+        self.client_id = None
 
         # Connection state.
         self.is_closed = asyncio.Event()
         self.pipe = None
         self.buf = b""
 
+        # Background task for processing messages.
+        self.dispatcher_task = None
+
     # Allow awaiting on the class object directly.
     def __await__(self):
         return self.connect().__await__()
+    
+    # Resets protocol-level state for a fresh connection.
+    def reset_session_state(self):
+        # Clear the stream buffer
+        self.buf = b""
+
+        # Cancel and clear protocol-level ACKs (PUBACK/SUBACK)
+        for packet_type in self.packet_ids:
+            for seq_no in self.packet_ids[packet_type]:
+                future = self.packet_ids[packet_type][seq_no]
+                if not future.done():
+                    future.set_exception(
+                        ConnectionError("Connection lost for packet ACK")
+                    )
+
+            # Fresh list of type id futures.
+            self.packet_ids[packet_type] = {}
+
+        # Reset packet ID counter for the new pipe
+        self.packet_id = 0
+
+        # Reset closed event.
+        self.is_closed = asyncio.Event()
     
     # Simple increasing packet ID with uniqueness checks.
     # Avoids zero which is an invalid packet ID.
@@ -117,7 +143,7 @@ class MQTTClient:
     # Also will start a background task that dispatches messages from self.send.
     async def connect(self, republish_duration=60, interval=5, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False, reconnect_delay=0):
         pipe = await mqtt_connect(self, keep_alive)
-        if pipe:
+        if pipe and self.dispatcher_task is None:
             """
             As dispatcher also sets self.pipe for reconnect -- there is a race
             condition between connect() and reconnect loop. Starting dispatcher
@@ -186,7 +212,12 @@ class MQTTClient:
         # The pipe sends disconnect, does shutdown, then close.
         if self.pipe:
             # Disconnect packet.
-            await self.pipe.send(bytes([0xE0, 0x00]))
+            disconnect_buf = bytes([0xE0, 0x00])
+            await async_wrap_errors(
+                self.pipe.send(disconnect_buf)
+            )
+
+            # Close pipe.
             await self.pipe.close()
             self.pipe = None
 
