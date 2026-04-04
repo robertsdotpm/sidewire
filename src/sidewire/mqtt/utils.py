@@ -55,3 +55,8 @@ def iter_all_messages(msg_queues):
             for seq_no in sorted(queue.keys()):
                 yield queue[seq_no]
 
+async def send_mqtt_puback(client, packet_id):
+    """Sends the 4-byte MQTT PUBACK to the broker."""
+    ack_packet = bytes([0x40, 0x02]) + packet_id
+    await client.pipe.send(ack_packet)
+
