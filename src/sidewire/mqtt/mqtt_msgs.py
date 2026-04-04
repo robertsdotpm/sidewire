@@ -1,12 +1,11 @@
 import struct
+import time
 from aionetiface import *
 from .mqtt_defs import *
 from .utils import *
 from .mqtt_packet import *
 
 def build_connect(client_id, keep_alive=60):
-    print("mqtt connect")
-
     # proto name, proto level, clean session, keep alive 60s
     vh = (
         mqtt_enc_str("MQTT") + 
@@ -33,7 +32,6 @@ def build_publish(topic, payload, packet_id, dup=False):
 
     # Base: PUBLISH + QoS1
     header = 0x30 | (1 << 1)   # 0x32
-
     if dup:
         header |= 0x08  # set DUP bit
 
@@ -41,17 +39,16 @@ def build_publish(topic, payload, packet_id, dup=False):
     return pkt
 
 def build_ping(last_ping, keep_alive):
-    """Send ping to server every so often."""
-    now = asyncio.get_event_loop().time()
+    now = time.time()
+    elapsed = now - last_ping
     if now - last_ping >= keep_alive:
         req = MQTTPacket(MQTTEnum.PINGREQ)
         buf = req.build()
         return now, buf
     
-    return now, None
+    return last_ping, None
 
 def build_puback(packet_id):
-    """Sends the 4-byte MQTT PUBACK to the broker."""
     buf = bytes([0x40, 0x02]) + packet_id
     return buf
 

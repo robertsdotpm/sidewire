@@ -24,9 +24,7 @@ def mqtt_decode_varint(buf, offset):
 
         byte = buf[offset + i]
         consumed += 1
-
         value += (byte & 0x7F) * multiplier
-
         if (byte & 0x80) == 0:
             return value, consumed
 

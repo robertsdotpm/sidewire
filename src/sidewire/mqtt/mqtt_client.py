@@ -95,7 +95,6 @@ class MQTTClient:
 
         # Background task for processing messages.
         self.dispatcher_task = None
-        self.ping_handler = blank_ping_handler
 
     # Receive back app protocol msgs unpacked.
     def add_msg_handler(self, msg_handler):
@@ -186,6 +185,9 @@ class MQTTClient:
             # Close pipe.
             await self.pipe.close()
             self.pipe = None
+
+    async def ping_handler(self):
+        pass
 
 # Example usage using -m
 async def workspace():

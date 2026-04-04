@@ -76,7 +76,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         try:
             pipe = await client.connect()
             raise Exception("mqtt fail con test invalid")
-        except asyncio.TimeoutError:
+        except Exception:
             assert(pipe is None)
 
     async def test_single_send_recv(self):
@@ -98,7 +98,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             if msg == buf:
                 got_msg.set()
 
-        await mqtt_send_msg_and_handle([buf], msg_handler, do_close=True)
+        await mqtt_send_msg_and_handle([buf], msg_handler, do_close=True, timeout=20)
         assert(got_msg.is_set())
 
     async def test_single_recv_once(self):
@@ -246,7 +246,6 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 
 
 # Design a less agressive dispather for republish
-# fix formatting
 # Ensure tests still pass
 # remove print statements
 

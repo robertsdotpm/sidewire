@@ -25,7 +25,7 @@ class MQTTPacket:
     def build(self):
         body = self.variable_header + self.payload
         fixed = mqtt_build_header(
-            len(body), # Total packet len.
+            len(body),
             self.type, 
             self.flags
         )
@@ -58,7 +58,6 @@ def mqtt_parse_packet(raw):
 
     # Do NOT attempt to interpret variable header or payload here
     pkt.body = body
-
     return pkt
 
 def mqtt_build_header(remaining_length, packet_type, flags):
@@ -79,12 +78,10 @@ def mqtt_parse_puback(packet):
     
     # A PUBACK variable header must be exactly 2 bytes.
     if len(body) < 2:
-        print("e: Malformed PUBACK - body too short")
         return None
 
     # Return the raw 2 bytes as the packet_id
     packet_id = body[:2]
-    
     return packet_id
 
 def mqtt_parse_publish(packet):
@@ -120,7 +117,6 @@ def mqtt_parse_publish(packet):
 
     # Payload (everything remaining)
     payload = to_s(body[offset:])
-
     return topic, payload, packet_id
 
     

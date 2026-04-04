@@ -1,19 +1,10 @@
 """
-The dispatcher is a background task that republishes queued messages based on a 
-retry interval and total duration until an application-level ACK is received. To 
-keep the code simple, the dispatcher does not enforce message ordering; instead, 
-callers are required to await an ACK before sending the next message to avoid 
-race conditions and out-of-order event execution.
+The Dispatcher is a background task that republishes queued messages at a set retry interval until an application-level ACK is received. To maintain architectural simplicity, it does not enforce message ordering internally; instead, callers must await each ACK before sending the next message to prevent race conditions and out-of-order execution. While this design is optimized for low-volume signaling rather than high-throughput data, it allows for future enhancements like sequence numbers to implicitly ACK and clear older messages.
 
-This design allows for easy optimization, such as using sequence numbers to 
-implicitly ACK and delete all older messages. The system is intended for 
-low-volume signaling rather than high-throughput data. Key safety measures 
-include running the reconnect loop first to ensure the communication pipe is 
-initialized and handling broken connections via a connection_lost callback. 
-Users should ensure both sides use consistent keep_alive intervals to avoid 
-synchronization failures.
+To ensure reliability, the system prioritizes running the reconnect loop first to initialize the communication pipe, handling any subsequent failures via a connection_lost callback. Because Asyncio is reactive and only identifies a broken connection after a failed interaction, a ping feature is used to trigger earlier reconnections. To avoid synchronization failures, keep-alive intervals must be consistent across both endpoints, with retry attempts tuned as a function of the interval and keep-alive duration to ensure they fall within a valid reconnect cycle.
 """
 import asyncio
+import time
 from aionetiface import *
 from .mqtt_connect import *
 from .mqtt_packet import *
@@ -23,7 +14,7 @@ from .mqtt_msgs import *
 # Cleanup handled by mqtt_client.close.
 async def dispatcher(client, republish_duration, interval, keep_alive, ignore_acked=False, reconnect_delay=0):
     republish_duration = max(republish_duration, 2 * keep_alive)
-    last_ping = asyncio.get_event_loop().time()
+    last_ping = time.time()
     try:
         # Loop forever until is close is set or task cancelled.
         while not client.is_closed.is_set():
