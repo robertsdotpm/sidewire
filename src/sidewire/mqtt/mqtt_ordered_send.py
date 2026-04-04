@@ -46,7 +46,7 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
     if pipe_id_hex not in client.msg_queues[msg_type]:
         client.msg_queues[msg_type][pipe_id_hex] = {}
 
-    # Get seq no
+    # Ensure no collisions for new messages.
     if seq_no is None:
         seq_no = len(client.msg_queues[msg_type][pipe_id_hex])
     
@@ -63,37 +63,30 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
     # This replaces the manual hex concatenation and signing block.
     out = packet.pack(client)
 
-    # Allow acks to be overwritten for queuing.
-    # Since they're reactive to msgs.
-    # if msg_type == MsgEnum.MSG:
+    # Otherwise we'll overwrite an existing meta section.
     assert(seq_no not in client.msg_queues[msg_type][pipe_id_hex])
 
-    # Queue message.
-    now = asyncio.get_event_loop().time()
+    # Message is queued by application type, high level pipe id, then seq.
     app_ack = asyncio.Future()
-    packet_id, packet_ack = packet_ack_future(client, MQTTEnum.PUBACK)
-    
-    # Python 3.5+ safety: checking type with isinstance is generally preferred
-    assert(isinstance(packet_id, bytes))
-
-    print("using packet id", packet_id)
     client.msg_queues[msg_type][pipe_id_hex][seq_no] = {
-        "attempts": 0,
+        # Application-level ack -- allows to confirm msg delivery.
+        "app_ack": app_ack,
+
+        # Where to send the message to.
         "dest_pk_hex": dest_pk_hex,
+
+        # Allows for sequential send and ordering.
         "seq_no": seq_no,
+
+        # A serialized buffer of an app packet to put into a mqtt publish.
         "out": out,
 
-        # Application-level ack, different from packet ack future.
-        "app_ack": app_ack,
-        "packet_ack": packet_ack,
+        # Last updated time at 0.
         "updated": 0,
-        "created": now,
-        "packet_id": packet_id,
+
+        # Created now.
+        "created": asyncio.get_event_loop().time(),
     }
     
-    # Publish the message as intended.
-    # if msg_type == MsgEnum.MSGACK:
-    #    await client.publish(dest_pk_hex, out)
-
     # Caller can await ack if they want.
     return out, app_ack

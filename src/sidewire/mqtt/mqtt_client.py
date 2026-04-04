@@ -51,7 +51,6 @@ from .mqtt_dispatch import *
 from .mqtt_connect import *
 from .mqtt_msgs import *
 
-# EG: IP4, Interface("default"), ("test.mosquitto.org", 1883), Signing.keypair()
 class MQTTClient:
     def __init__(self, af, nic, dest, kp):
         # Addressing info for connected MQTT server.
@@ -133,7 +132,7 @@ class MQTTClient:
 
     # Internal: used to subscribe to own pub key hex.
     # Returns packet and future to await ack for the packet from the server.
-    def subscribe(self, topic, timeout=4):
+    def subscribe(self, topic):
         assert(type(topic) == str)
         packet_id, packet_ack = packet_ack_future(self, MQTTEnum.SUBACK)
         buf = build_subscribe(topic, packet_id)
@@ -179,7 +178,7 @@ class MQTTClient:
         # The pipe sends disconnect, does shutdown, then close.
         if self.pipe:
             # Disconnect packet.
-            disconnect_buf = bytes([0xE0, 0x00])
+            disconnect_buf = build_disconnect()
             await async_wrap_errors(
                 self.pipe.send(disconnect_buf)
             )

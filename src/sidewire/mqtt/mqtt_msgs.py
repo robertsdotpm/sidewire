@@ -25,7 +25,6 @@ def build_subscribe(topic, packet_id):
     pl = mqtt_enc_str(topic) + b"\x01"  # QoS 1
     pkt = b"\x82" + mqtt_encode_varint(len(vh) + len(pl)) + vh + pl
     return pkt
-    print("sub pkt = ", pkt)
 
 def build_publish(topic, payload, packet_id, dup=False):
     packet_id = packet_id
@@ -54,4 +53,8 @@ def build_ping(last_ping, keep_alive):
 def build_puback(packet_id):
     """Sends the 4-byte MQTT PUBACK to the broker."""
     buf = bytes([0x40, 0x02]) + packet_id
+    return buf
+
+def build_disconnect():
+    buf = bytes([0xE0, 0x00])
     return buf
