@@ -6,7 +6,7 @@ from .mqtt_defs import *
 async def process_app_msg(client, app_packet):
     # Using the integer directly from the object.
     seq_no = app_packet.seq_no
-    pipe_id = app_packet.pipe_id_hex
+    queue_id = app_packet.queue_id_hex
     src_pk = app_packet.src_pk_hex
     msg = app_packet.msg
 
@@ -25,9 +25,9 @@ async def process_app_msg(client, app_packet):
     This code deletes any queued acks older than the current message sequence.
     """
     msg_ack_queues = client.msg_queues[MsgEnum.MSGACK]
-    if pipe_id in msg_ack_queues:
+    if queue_id in msg_ack_queues:
         # List of sequenced app-level ack metas.
-        ack_queue = msg_ack_queues[pipe_id]
+        ack_queue = msg_ack_queues[queue_id]
         
         # Remove queued application acks that are no longer relevant.
         for old_seq in list(ack_queue.keys()):
@@ -53,7 +53,7 @@ async def process_app_msg(client, app_packet):
     # Trigger registered app handlers
     for msg_handler in client.msg_handlers:
         await async_wrap_errors(
-            msg_handler(msg, src_pk, pipe_id, client)
+            msg_handler(msg, src_pk, queue_id, client)
         )
 
     # Send Application ACK back to sender
@@ -61,7 +61,7 @@ async def process_app_msg(client, app_packet):
         client.queue_msg(
             "ack",
             src_pk,
-            pipe_id,
+            queue_id,
             MsgEnum.MSGACK,
             seq_no=seq_no
         )
@@ -71,16 +71,16 @@ async def process_app_msg(client, app_packet):
 # Function called for new application (type=msgack) publishes.
 def process_app_ack(client, app_packet):
     # Pull fields directly from the object
-    pipe_id = app_packet.pipe_id_hex
+    queue_id = app_packet.queue_id_hex
     seq_no = app_packet.seq_no
     src_pk = app_packet.src_pk_hex
 
     # Check if we even have a queue for this pipe ID.
-    if pipe_id not in client.msg_queues[MsgEnum.MSG]:
+    if queue_id not in client.msg_queues[MsgEnum.MSG]:
         return
     
     # Check sequence exists.
-    msg_queue = client.msg_queues[MsgEnum.MSG][pipe_id]
+    msg_queue = client.msg_queues[MsgEnum.MSG][queue_id]
     if seq_no not in msg_queue:
         return
         

@@ -46,10 +46,10 @@ def packet_ack_future(client, packet_type):
 def iter_all_messages(msg_queues):
     # Queues are split by app msg type: MSG or MSGACK.
     for msg_type in msg_queues:
-        # Each plugin instance has a unique pipe_id.
-        for pipe_id_hex in list(msg_queues[msg_type].keys()):
+        # Each plugin instance has a unique queue_id.
+        for queue_id_hex in list(msg_queues[msg_type].keys()):
             # Messages are further indexed by sequence (order.)
-            queue = msg_queues[msg_type][pipe_id_hex]
+            queue = msg_queues[msg_type][queue_id_hex]
             for seq_no in sorted(queue.keys()):
                 yield queue[seq_no]
 

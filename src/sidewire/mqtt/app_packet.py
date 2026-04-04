@@ -2,11 +2,11 @@ from ecdsa import VerifyingKey, SECP256k1, util
 from aionetiface import *
 
 class AppPacket:
-    def __init__(self, src_pk_hex=None, sig_hex=None, pipe_id_hex=None, 
+    def __init__(self, src_pk_hex=None, sig_hex=None, queue_id_hex=None, 
             seq_no=None, msg_type=None, msg=None):
         self.src_pk_hex = src_pk_hex
         self.sig_hex = sig_hex
-        self.pipe_id_hex = pipe_id_hex
+        self.queue_id_hex = queue_id_hex
         self.seq_no = seq_no
         self.msg_type = msg_type
         self.msg = msg
@@ -27,7 +27,7 @@ class AppPacket:
         Constructs the full hex string to be sent over the wire.
         """
         # Validate inputs
-        assert(len(self.pipe_id_hex) == 64)
+        assert(len(self.queue_id_hex) == 64)
         
         # Prepend application-level header to message portion.
         # msg_type is converted to hex (2 chars)
@@ -36,7 +36,7 @@ class AppPacket:
         headered_msg = type_hex + self.msg
 
         # Signed message section.
-        signed_msg = self.pipe_id_hex + self.seq_no_hex + headered_msg
+        signed_msg = self.queue_id_hex + self.seq_no_hex + headered_msg
         
         # Sign the binary representation of the hex string
         signed_msg_bytes = to_b(signed_msg)
@@ -93,8 +93,8 @@ class AppPacket:
             return None
 
         # Route to Application Logic
-        # msg_data Layout: [pipe_id(64)][seq(8)][type(2)][msg...]
-        pipe_id_hex = signed_msg_hex[:64]
+        # msg_data Layout: [queue_id(64)][seq(8)][type(2)][msg...]
+        queue_id_hex = signed_msg_hex[:64]
         seq_no_hex = signed_msg_hex[64:72]
         app_payload = signed_msg_hex[72:]
         
@@ -110,7 +110,7 @@ class AppPacket:
         return cls(
             src_pk_hex=src_pk_hex,
             sig_hex=sig_hex,
-            pipe_id_hex=pipe_id_hex,
+            queue_id_hex=queue_id_hex,
             seq_no=seq_no_int,
             msg_type=msg_type,
             msg=actual_msg

@@ -138,14 +138,14 @@ class MQTTClient:
         return buf, packet_ack
     
     # High level function: send a message to a dest pub key hash (topic.)
-    # Puts the msg in a sequenced queue called pipe_id_hex to be republished.
+    # Puts the msg in a sequenced queue called queue_id_hex to be republished.
     # A background dispatcher task loops over these queues to repub messages.
-    def queue_msg(self, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
+    def queue_msg(self, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
         return ordered_ack_send(
             self,
             msg,
             dest_pk_hex,
-            pipe_id_hex,
+            queue_id_hex,
             msg_type,
             seq_no
         )
@@ -214,19 +214,19 @@ async def workspace():
     This will probably end up being a closure that has an embedded reference
     back to the plugin manager.
     """
-    async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
-        print("msg handler got ", msg, " ", src_pk_hex, " ", pipe_id_hex)
+    async def msg_handler(msg, src_pk_hex, queue_id_hex, client):
+        print("msg handler got ", msg, " ", src_pk_hex, " ", queue_id_hex)
 
     # Connect Alice client.
     alice_kp = Signing.keypair()
-    alice_pipe_id = hashlib.sha256(b"alice pipe").hexdigest()
+    alice_queue_id = hashlib.sha256(b"alice pipe").hexdigest()
     alice_client = MQTTClient(IP4, nic, ("ovh1.p2pd.net", 1883), alice_kp)
     await alice_client.connect()
     alice_client.pipe.sock.close()
 
     # Connect Bob client.
     bob_kp = Signing.keypair()
-    bob_pipe_id = hashlib.sha256(b"bob plugin").hexdigest()
+    bob_queue_id = hashlib.sha256(b"bob plugin").hexdigest()
     bob_client = MQTTClient(IP4, nic, ("ovh1.p2pd.net", 1883), bob_kp)
     bob_client.add_msg_handler(msg_handler)
     await bob_client.connect()
@@ -236,7 +236,7 @@ async def workspace():
         "hello bob -- with ordering and ack", 
         # Destination channel is Bob's public key hex.
         to_hs(bob_kp.compact_public_key),
-        alice_pipe_id
+        alice_queue_id
     )
     
     # Wait for alice to receive the message.
