@@ -36,7 +36,7 @@ async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republ
             pipe_id_hex
         )
 
-        print(out, id(got_ack))
+        #print(out, id(got_ack))
 
         # Sleep timeout.
         if min_sleep:
@@ -48,11 +48,11 @@ async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republ
                 try:
                     await asyncio.wait_for(got_ack, timeout)
                 except asyncio.TimeoutError:
-                    print("timeout error")
+                    #print("timeout error")
                     pass
             else:
                 await asyncio.wait_for(got_ack, timeout)
-                print("wait for ack")
+                #print("wait for ack")
 
         if not ack_await:
             await asyncio.sleep(2 * len(msg_list))
@@ -193,7 +193,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             recv_list.append(msg)
 
         await mqtt_send_msg_and_handle(msg_list, msg_handler, ack_await=True)
-        print(recv_list)
+        #print(recv_list)
         #assert(recv_list == msg_list)
 
     # Add all the messages concurrently with send then check result.
@@ -206,7 +206,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             recv_list.append(msg)
 
         await mqtt_send_msg_and_handle(msg_list, msg_handler, ack_await=False)
-        print(recv_list)
+        #print(recv_list)
         assert(recv_list == msg_list)
 
     async def test_multiple_servers(self):
@@ -224,10 +224,11 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             "broker.hivemq.com",
         ]
 
-        
+        """
         host_list = [
             "broker.mqttdashboard.com"
         ]
+        """
 
         #host_list = ["ovh1.p2pd.net"]
         msg_list = ["first msg", "second msg", "third"]
@@ -241,13 +242,9 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             server = (host, 1883)
             await mqtt_send_msg_and_handle(msg_list, msg_handler, server=server, interval=5, timeout=3)
             # Part 1: no message duplication.
-            print(recv_list)
+            #print(recv_list)
             assert(recv_list == msg_list)
 
-
-# Design a less agressive dispather for republish
-# Ensure tests still pass
-# remove print statements
 
 if __name__ == '__main__':
     main()

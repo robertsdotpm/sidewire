@@ -33,6 +33,7 @@ class MQTTPacket:
         return fixed + body
     
     def debug_print(self):
+        return
         print("mqtt pkt debug print = ")
         print(self.type)
         print(self.payload)

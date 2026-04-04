@@ -5,6 +5,7 @@ To ensure reliability, the system prioritizes running the reconnect loop first t
 """
 import asyncio
 import time
+import random 
 from aionetiface import *
 from .mqtt_connect import *
 from .mqtt_packet import *
@@ -45,11 +46,12 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
             if ping_buf: 
                 await client.pipe.send(ping_buf)
     except asyncio.CancelledError:
-        print("dispatcher exited.")
+        #print("dispatcher exited.")
+        pass
     except Exception:
         log_exception()
 
-    print("dispatcher exited cleanly.")
+    #print("dispatcher exited cleanly.")
 
 async def republish_meta(client, meta, now, interval, republish_duration, ignore_acked):
     # Message has already been acked.
@@ -58,8 +60,19 @@ async def republish_meta(client, meta, now, interval, republish_duration, ignore
             return
 
     # Don't rebroadcast if too soon.
+    # We implement exponential backoff with jitter here.
+    # 'attempts' tracks how many times we have retried this specific message.
+    attempts = meta.get("attempts", 0)
+    
+    # Calculate backoff: interval * 2^attempts.
+    # We cap the backoff at a reasonable maximum (e.g., 60s) to keep it responsive.
+    back_off = min(interval * (2 ** attempts), 60)
+    
+    # Apply "Full Jitter": pick a random value between 0 and the backoff.
+    # This spreads out retries to prevent network spikes.
+    jittered_interval = random.uniform(0, back_off)
     interval_elapsed = now - meta["updated"]
-    if interval_elapsed < interval:
+    if interval_elapsed < jittered_interval:
         return
 
     # Republish duration exceeded.
@@ -69,6 +82,7 @@ async def republish_meta(client, meta, now, interval, republish_duration, ignore
 
     # Increase state counters.
     meta["updated"] = now
+    meta["attempts"] = attempts + 1
 
     # Create publish packet to send.
     buf, packet_ack = client.publish(

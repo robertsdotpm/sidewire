@@ -43,7 +43,7 @@ async def mqtt_connect(self, keep_alive):
         await pipe.close()
         raise BadProtoResp("Invalid MQTT CONNACK: {}".format(connack))
 
-    print("MQTT Connected: {}".format(self.client_id))
+    #print("MQTT Connected: {}".format(self.client_id))
 
     # Message Processing Setup
     self.pipe = pipe
@@ -88,7 +88,7 @@ async def reconnect_loop(client, keep_alive):
         if client.pipe and not client.pipe.on_close.is_set():
             return
 
-        print("Got con lost event")
+        #print("Got con lost event")
         # Close old handle.
         if client.pipe:
             # Cleanup a past client -- close its message dispatcher.
@@ -108,5 +108,5 @@ async def reconnect_loop(client, keep_alive):
             pass
 
         # Avoid immediately reconnecting to avoid DoS.
-        print("In disconnect loop?")
+        #print("In disconnect loop?")
         await asyncio.sleep(60)

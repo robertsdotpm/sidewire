@@ -50,7 +50,7 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
     if seq_no is None:
         seq_no = len(client.msg_queues[msg_type][queue_id_hex])
     
-    print("order send seq no =", seq_no)
+    #print("order send seq no =", seq_no)
 
     # Use the new class to handle packing, signing, and header construction.
     packet = AppPacket(
@@ -86,6 +86,9 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
 
         # Created now.
         "created": asyncio.get_event_loop().time(),
+
+        #Track rebroadcast count.
+        "amount": 0,
     }
     
     # Caller can await ack if they want.

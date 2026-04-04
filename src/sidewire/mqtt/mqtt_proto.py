@@ -75,7 +75,7 @@ async def handle_publish(client, packet):
     # Publish-specific function for parsing a packet.
     parsed = mqtt_parse_publish(packet)
     if not parsed:
-        print("e: invalid publish packet")
+        #print("e: invalid publish packet")
         return
 
     # Immediate MQTT Ack to keep the broker's in-flight window open
@@ -87,7 +87,7 @@ async def handle_publish(client, packet):
     # Key Check: Is this message meant for us?
     # Comparing binary to binary for safety.
     if h_to_b(topic) != client.kp.compact_public_key:
-        print("e: Recv msg not meant for us.")
+        #print("e: Recv msg not meant for us.")
         return
 
     # Use the class to verify signature and extract fields.

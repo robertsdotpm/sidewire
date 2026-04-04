@@ -61,7 +61,6 @@ class AppPacket:
         header_overhead = 266
         expected_len = header_overhead + len(headered_msg)
         assert(len(out) == expected_len)
-        
         return out
 
     @classmethod
@@ -89,7 +88,7 @@ class AppPacket:
             )
         except Exception:
             # Common failure point if keys or signatures are malformed
-            print("e: Signature verification failed")
+            #print("e: Signature verification failed")
             return None
 
         # Route to Application Logic
@@ -106,7 +105,6 @@ class AppPacket:
 
         # Convert hex sequence back to integer
         seq_no_int = int(seq_no_hex, 16)
-
         return cls(
             src_pk_hex=src_pk_hex,
             sig_hex=sig_hex,
