@@ -99,46 +99,6 @@ class MQTTClient:
     def __await__(self):
         return self.connect().__await__()
     
-    # Resets protocol-level state for a fresh connection.
-    def reset_session_state(self):
-        # Clear the stream buffer
-        self.buf = b""
-
-        # Cancel and clear protocol-level ACKs (PUBACK/SUBACK)
-        for packet_type in self.packet_ids:
-            for seq_no in self.packet_ids[packet_type]:
-                future = self.packet_ids[packet_type][seq_no]
-                if not future.done():
-                    future.set_exception(
-                        ConnectionError("Connection lost for packet ACK")
-                    )
-
-            # Fresh list of type id futures.
-            self.packet_ids[packet_type] = {}
-
-        # Reset packet ID counter for the new pipe
-        self.packet_id = 0
-
-        # Reset closed event.
-        self.is_closed = asyncio.Event()
-    
-    # Simple increasing packet ID with uniqueness checks.
-    # Avoids zero which is an invalid packet ID.
-    def get_packet_id(self):
-        while True:
-            self.packet_id = (self.packet_id % 65535) + 1
-            assert(self.packet_id)
-            if self.packet_id not in self.packet_ids:
-                return struct.pack(">H", self.packet_id)
-    
-    # High-level message handlers handle messages received from other class.send()ers.
-    def add_msg_handler(self, msg_handler):
-        self.msg_handlers.append(msg_handler)
-
-    # Mostly used to test ping resps are received.
-    async def ping_handler(self):
-        pass
-    
     # Connect to MQTT server and subscribe to our own pub key hex topic.
     # Also will start a background task that dispatches messages from self.send.
     async def connect(self, republish_duration=60, interval=5, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False, reconnect_delay=0):
@@ -171,7 +131,20 @@ class MQTTClient:
         packet_id, packet_ack = packet_ack_future(self, MQTTEnum.SUBACK)
         buf = build_subscribe(topic, packet_id)
         return buf, packet_ack
-
+    
+    # High level function: send a message to a dest pub key hash (topic.)
+    # Puts the msg in a sequenced queue called pipe_id_hex to be republished.
+    # A background dispatcher task loops over these queues to repub messages.
+    def queue_msg(self, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
+        return ordered_ack_send(
+            self,
+            msg,
+            dest_pk_hex,
+            pipe_id_hex,
+            msg_type,
+            seq_no
+        )
+    
     # Internal: used to publish signed messages to pub key hashed topics.
     # Returns packet and future to await ack for the packet from the server.
     def publish(self, topic, payload, dup=False):
@@ -181,18 +154,42 @@ class MQTTClient:
         buf = build_publish(topic, payload, packet_id, dup)
         return buf, packet_ack
     
-    # High level function: send a message to a dest pub key hash (topic.)
-    # Puts the msg in a sequenced queue called pipe_id_hex to be republished.
-    # A background dispatcher task loops over these queues to repub messages.
-    def send(self, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
-        return ordered_ack_send(
-            self,
-            msg,
-            dest_pk_hex,
-            pipe_id_hex,
-            msg_type,
-            seq_no
-        )
+    # High-level message handlers handle messages received from other class.send()ers.
+    def add_msg_handler(self, msg_handler):
+        self.msg_handlers.append(msg_handler)
+    
+    # Resets protocol-level state for a fresh connection.
+    def reset_session_state(self):
+        # Clear the stream buffer
+        self.buf = b""
+
+        # Cancel and clear protocol-level ACKs (PUBACK/SUBACK)
+        for packet_type in self.packet_ids:
+            for seq_no in self.packet_ids[packet_type]:
+                future = self.packet_ids[packet_type][seq_no]
+                if not future.done():
+                    future.set_exception(
+                        ConnectionError("Connection lost for packet ACK")
+                    )
+
+            # Fresh list of type id futures.
+            self.packet_ids[packet_type] = {}
+
+        # Reset packet ID counter for the new pipe
+        self.packet_id = 0
+    
+    # Simple increasing packet ID with uniqueness checks.
+    # Avoids zero which is an invalid packet ID.
+    def get_packet_id(self):
+        while True:
+            self.packet_id = (self.packet_id % 65535) + 1
+            assert(self.packet_id)
+            if self.packet_id not in self.packet_ids:
+                return struct.pack(">H", self.packet_id)
+
+    # Mostly used to test ping resps are received.
+    async def ping_handler(self):
+        pass
     
     # Cleanly disconnect from MQTT server.
     async def close(self):
@@ -264,7 +261,7 @@ async def workspace():
     await bob_client.connect()
 
     # Send a message from alice to bob.
-    _, bob_ack_msg = alice_client.send(
+    _, bob_ack_msg = alice_client.queue_msg(
         "hello bob -- with ordering and ack", 
         # Destination channel is Bob's public key hex.
         to_hs(bob_kp.compact_public_key),

@@ -54,3 +54,4 @@ def iter_all_messages(msg_queues):
             queue = msg_queues[msg_type][pipe_id_hex]
             for seq_no in sorted(queue.keys()):
                 yield queue[seq_no]
+

@@ -26,6 +26,7 @@ from .utils import *
 from ..signing import *
 from .mqtt_packet import *
 from .mqtt_proto import *
+from .app_packet import *
 
 def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
     assert(len(pipe_id_hex) == 64)
@@ -34,12 +35,9 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
     # Duplicate messages may be a bug by the caller.
     sent_msg_id = hashlib.sha256(to_b(msg)).hexdigest()
     if sent_msg_id in client.sent_msg_ids:
-        er  = "msg id in sent msg ids in ordered send, is this intended? "
+        er = "msg id in sent msg ids in ordered send, is this intended? "
         er += sent_msg_id
         log(er)
-
-    # Prepend application-level header to message portion.
-    msg = to_h(bytes([msg_type])) + msg
 
     # Create queue per pipe ID.
     if pipe_id_hex not in client.msg_queues[msg_type]:
@@ -48,37 +46,32 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
     # Get seq no
     if seq_no is None:
         seq_no = len(client.msg_queues[msg_type][pipe_id_hex])
-    seq_no_hex = "{:08x}".format(seq_no)
+    
     print("order send seq no =", seq_no)
 
-    # Signed message section.
-    signed_msg = pipe_id_hex + seq_no_hex + msg
-    sig = client.kp.private_key.sign(
-        to_b(signed_msg),
-        sigencode=util.sigencode_string
+    # Use the new class to handle packing, signing, and header construction.
+    packet = AppPacket(
+        pipe_id_hex=pipe_id_hex,
+        seq_no=seq_no,
+        msg_type=msg_type,
+        msg=msg
     )
-    sig_hex = to_h(sig)
-    assert(len(sig_hex) == 128)
-
-    # Our public key.
-    src_pk_hex = to_h(client.kp.compact_public_key) # 66
-    assert(len(src_pk_hex) == 66)
-
-    # Full proto message to send.
-    out = src_pk_hex + sig_hex + signed_msg
-    assert(type(out) == str)
-    assert(len(out) == (266 + len(msg)))
+    
+    # This replaces the manual hex concatenation and signing block.
+    out = packet.pack(client)
 
     # Allow acks to be overwritten for queuing.
     # Since they're reactive to msgs.
-    #if msg_type == MsgEnum.MSG:
+    # if msg_type == MsgEnum.MSG:
     assert(seq_no not in client.msg_queues[msg_type][pipe_id_hex])
 
     # Queue message.
     now = asyncio.get_event_loop().time()
     app_ack = asyncio.Future()
     packet_id, packet_ack = packet_ack_future(client, MQTTEnum.PUBACK)
-    assert(type(packet_id) == bytes)
+    
+    # Python 3.5+ safety: checking type with isinstance is generally preferred
+    assert(isinstance(packet_id, bytes))
 
     print("using packet id", packet_id)
     client.msg_queues[msg_type][pipe_id_hex][seq_no] = {
@@ -96,7 +89,7 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
     }
     
     # Publish the message as intended.
-    #if msg_type == MsgEnum.MSGACK:
+    # if msg_type == MsgEnum.MSGACK:
     #    await client.publish(dest_pk_hex, out)
 
     # Caller can await ack if they want.
