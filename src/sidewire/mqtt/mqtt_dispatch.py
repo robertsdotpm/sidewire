@@ -5,7 +5,7 @@ To ensure reliability, the system prioritizes running the reconnect loop first t
 """
 import asyncio
 import time
-import random 
+import random
 from aionetiface import *
 from .mqtt_connect import *
 from .mqtt_packet import *
@@ -15,7 +15,7 @@ from .mqtt_msgs import *
 # Cleanup handled by mqtt_client.close.
 async def dispatcher(client, republish_duration, interval, keep_alive, ignore_acked=False, reconnect_delay=0):
     republish_duration = max(republish_duration, 2 * keep_alive)
-    last_ping = time.time()
+    last_ping = asyncio.get_event_loop().time()
     try:
         # Loop forever until is close is set or task cancelled.
         while not client.is_closed.is_set():
@@ -59,18 +59,21 @@ async def republish_meta(client, meta, now, interval, republish_duration, ignore
         if meta["app_ack"].done():
             return
 
-    # Don't rebroadcast if too soon.
-    # We implement exponential backoff with jitter here.
-    # 'attempts' tracks how many times we have retried this specific message.
+    # To handle multiple destinations independently, we store retry state 
+    # directly in the 'meta' object for this specific message.
     attempts = meta.get("attempts", 0)
-    
-    # Calculate backoff: interval * 2^attempts.
-    # We cap the backoff at a reasonable maximum (e.g., 60s) to keep it responsive.
-    back_off = min(interval * (2 ** attempts), 60)
-    
-    # Apply "Full Jitter": pick a random value between 0 and the backoff.
-    # This spreads out retries to prevent network spikes.
-    jittered_interval = random.uniform(0, back_off)
+
+    # Calculate backoff based on attempts: interval * 2^attempts.
+    # We cap the backoff at republish_duration to ensure we don't 
+    # wait longer than the message's total allowed lifespan.
+    backoff_limit = min(60, republish_duration) # Sane cap of 60s or duration.
+    current_backoff = min(interval * (2 ** attempts), backoff_limit)
+
+    # Apply Full Jitter: randomize the wait to prevent "thundering herd" 
+    # if multiple messages were queued at once.
+    jittered_interval = random.uniform(interval, current_backoff)
+
+    # Don't rebroadcast if too soon.
     interval_elapsed = now - meta["updated"]
     if interval_elapsed < jittered_interval:
         return
@@ -80,7 +83,7 @@ async def republish_meta(client, meta, now, interval, republish_duration, ignore
     if total_elapsed >= republish_duration:
         return
 
-    # Increase state counters.
+    # Increase state counters for THIS specific message.
     meta["updated"] = now
     meta["attempts"] = attempts + 1
 

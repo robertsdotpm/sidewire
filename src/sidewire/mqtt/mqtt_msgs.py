@@ -39,8 +39,7 @@ def build_publish(topic, payload, packet_id, dup=False):
     return pkt
 
 def build_ping(last_ping, keep_alive):
-    now = time.time()
-    elapsed = now - last_ping
+    now = asyncio.get_event_loop().time()
     if now - last_ping >= keep_alive:
         req = MQTTPacket(MQTTEnum.PINGREQ)
         buf = req.build()
