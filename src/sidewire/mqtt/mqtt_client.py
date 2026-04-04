@@ -94,6 +94,11 @@ class MQTTClient:
 
         # Background task for processing messages.
         self.dispatcher_task = None
+        self.ping_handler = blank_ping_handler
+
+    # Receive back app protocol msgs unpacked.
+    def add_msg_handler(self, msg_handler):
+        self.msg_handlers.append(msg_handler)
 
     # Allow awaiting on the class object directly.
     def __await__(self):
@@ -153,43 +158,6 @@ class MQTTClient:
         packet_id, packet_ack = packet_ack_future(self, MQTTEnum.PUBACK)
         buf = build_publish(topic, payload, packet_id, dup)
         return buf, packet_ack
-    
-    # High-level message handlers handle messages received from other class.send()ers.
-    def add_msg_handler(self, msg_handler):
-        self.msg_handlers.append(msg_handler)
-    
-    # Resets protocol-level state for a fresh connection.
-    def reset_session_state(self):
-        # Clear the stream buffer
-        self.buf = b""
-
-        # Cancel and clear protocol-level ACKs (PUBACK/SUBACK)
-        for packet_type in self.packet_ids:
-            for seq_no in self.packet_ids[packet_type]:
-                future = self.packet_ids[packet_type][seq_no]
-                if not future.done():
-                    future.set_exception(
-                        ConnectionError("Connection lost for packet ACK")
-                    )
-
-            # Fresh list of type id futures.
-            self.packet_ids[packet_type] = {}
-
-        # Reset packet ID counter for the new pipe
-        self.packet_id = 0
-    
-    # Simple increasing packet ID with uniqueness checks.
-    # Avoids zero which is an invalid packet ID.
-    def get_packet_id(self):
-        while True:
-            self.packet_id = (self.packet_id % 65535) + 1
-            assert(self.packet_id)
-            if self.packet_id not in self.packet_ids:
-                return struct.pack(">H", self.packet_id)
-
-    # Mostly used to test ping resps are received.
-    async def ping_handler(self):
-        pass
     
     # Cleanly disconnect from MQTT server.
     async def close(self):

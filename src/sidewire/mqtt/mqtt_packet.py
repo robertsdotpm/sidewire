@@ -175,6 +175,11 @@ def build_ping(last_ping, keep_alive):
         return now, buf
     
     return now, None
+
+def build_puback(packet_id):
+    """Sends the 4-byte MQTT PUBACK to the broker."""
+    buf = bytes([0x40, 0x02]) + packet_id
+    return buf
     
 if __name__ == "__main__":
     topic = "test/topic"

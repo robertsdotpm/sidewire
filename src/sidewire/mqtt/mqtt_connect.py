@@ -95,7 +95,7 @@ async def reconnect_loop(client, keep_alive):
 
         # Reset the old session state.
         # (packet ids, buf, packet id counter, closed event.)
-        client.reset_session_state()
+        reset_session_state(client)
 
         # Connect a new pipe.
         try:

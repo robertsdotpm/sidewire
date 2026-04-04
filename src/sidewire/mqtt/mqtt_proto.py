@@ -80,7 +80,8 @@ async def handle_publish(client, packet):
     # Immediate MQTT Ack to keep the broker's in-flight window open
     topic, payload, packet_id = parsed
     if packet_id:
-        await send_mqtt_puback(client, packet_id)
+        puback_buf = build_puback(packet_id)
+        await client.pipe.send(puback_buf)
 
     # Key Check: Is this message meant for us?
     # Comparing binary to binary for safety.

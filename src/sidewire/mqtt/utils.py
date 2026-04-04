@@ -39,7 +39,7 @@ def mqtt_enc_str(s):
     return struct.pack("!H", len(b)) + b
 
 def packet_ack_future(client, packet_type):
-    packet_id = client.get_packet_id()
+    packet_id = get_packet_id(client)
     packet_ack = asyncio.Future()
     client.packet_ids[packet_type][packet_id] = packet_ack
     return packet_id, packet_ack
@@ -55,8 +55,35 @@ def iter_all_messages(msg_queues):
             for seq_no in sorted(queue.keys()):
                 yield queue[seq_no]
 
-async def send_mqtt_puback(client, packet_id):
-    """Sends the 4-byte MQTT PUBACK to the broker."""
-    ack_packet = bytes([0x40, 0x02]) + packet_id
-    await client.pipe.send(ack_packet)
+# Resets protocol-level state for a fresh connection.
+def reset_session_state(client):
+    # Clear the stream buffer
+    client.buf = b""
 
+    # Cancel and clear protocol-level ACKs (PUBACK/SUBACK)
+    for packet_type in client.packet_ids:
+        for seq_no in client.packet_ids[packet_type]:
+            future = client.packet_ids[packet_type][seq_no]
+            if not future.done():
+                future.set_exception(
+                    ConnectionError("Connection lost for packet ACK")
+                )
+
+        # Fresh list of type id futures.
+        client.packet_ids[packet_type] = {}
+
+    # Reset packet ID counter for the new pipe
+    client.packet_id = 0
+
+# Simple increasing packet ID with uniqueness checks.
+# Avoids zero which is an invalid packet ID.
+def get_packet_id(client):
+    while True:
+        client.packet_id = (client.packet_id % 65535) + 1
+        assert(client.packet_id)
+        if client.packet_id not in client.packet_ids:
+            return struct.pack(">H", client.packet_id)
+        
+# Mostly used to test ping resps are received.
+async def blank_ping_handler(self):
+    pass
