@@ -49,6 +49,7 @@ from .mqtt_proto import *
 from .mqtt_ordered_send import *
 from .mqtt_dispatch import *
 from .mqtt_connect import *
+from .mqtt_msgs import *
 
 # EG: IP4, Interface("default"), ("test.mosquitto.org", 1883), Signing.keypair()
 class MQTTClient:

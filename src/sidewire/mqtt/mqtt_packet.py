@@ -3,15 +3,6 @@ from aionetiface import *
 from .mqtt_defs import *
 from .utils import *
 
-def mqtt_build_header(remaining_length, packet_type, flags):
-    packet_type_part = int(packet_type) << 4
-    flags_part = flags & 0x0F
-    first_byte = packet_type_part | flags_part
-    return (
-        bytes([first_byte]) +
-        mqtt_encode_varint(remaining_length)
-    )
-
 class MQTTPacket:
     def __init__(self, packet_type, flags=0):
         self.type = MQTTEnum(packet_type)
@@ -39,18 +30,45 @@ class MQTTPacket:
             self.flags
         )
 
-        """
-            b (Fixed header + flags),
-            varint (total len),
-            optional header: (packet-specific, e.g. packet id),
-            payload bytes ...
-        """
         return fixed + body
     
     def debug_print(self):
         print("mqtt pkt debug print = ")
         print(self.type)
         print(self.payload)
+
+def mqtt_parse_packet(raw):
+    offset = 0
+
+    # Fixed header byte
+    first_byte = raw[offset]
+    offset += 1
+
+    packet_type = first_byte >> 4
+    flags = first_byte & 0x0F
+
+    # Remaining Length (varint)
+    remaining_length, consumed = mqtt_decode_varint(raw, offset)
+    offset += consumed
+
+    # Extract full body (variable header + payload, unparsed)
+    body = raw[offset:offset + remaining_length]
+
+    pkt = MQTTPacket(packet_type, flags)
+
+    # Do NOT attempt to interpret variable header or payload here
+    pkt.body = body
+
+    return pkt
+
+def mqtt_build_header(remaining_length, packet_type, flags):
+    packet_type_part = int(packet_type) << 4
+    flags_part = flags & 0x0F
+    first_byte = packet_type_part | flags_part
+    return (
+        bytes([first_byte]) +
+        mqtt_encode_varint(remaining_length)
+    )
 
 def mqtt_parse_puback(packet):
     """
@@ -105,81 +123,6 @@ def mqtt_parse_publish(packet):
 
     return topic, payload, packet_id
 
-def mqtt_parse_packet(raw):
-    offset = 0
-
-    # Fixed header byte
-    first_byte = raw[offset]
-    offset += 1
-
-    packet_type = first_byte >> 4
-    flags = first_byte & 0x0F
-
-    # Remaining Length (varint)
-    remaining_length, consumed = mqtt_decode_varint(raw, offset)
-    offset += consumed
-
-    # Extract full body (variable header + payload, unparsed)
-    body = raw[offset:offset + remaining_length]
-
-    pkt = MQTTPacket(packet_type, flags)
-
-    # Do NOT attempt to interpret variable header or payload here
-    pkt.body = body
-
-    return pkt
-
-def build_connect(client_id, keep_alive=60):
-    print("mqtt connect")
-
-    # proto name, proto level, clean session, keep alive 60s
-    vh = (
-        mqtt_enc_str("MQTT") + 
-        b"\x04" + 
-        b"\x02" + 
-        struct.pack("!H", keep_alive)
-    )
-    pl = mqtt_enc_str(client_id)
-
-    # Full packet to send.
-    pkt = b"\x10" + mqtt_encode_varint(len(vh) + len(pl)) + vh + pl
-    return pkt
-
-def build_subscribe(topic, packet_id):
-    vh = packet_id
-    pl = mqtt_enc_str(topic) + b"\x01"  # QoS 1
-    pkt = b"\x82" + mqtt_encode_varint(len(vh) + len(pl)) + vh + pl
-    return pkt
-    print("sub pkt = ", pkt)
-
-def build_publish(topic, payload, packet_id, dup=False):
-    packet_id = packet_id
-    topic_bytes = mqtt_enc_str(topic)
-    pl = topic_bytes + packet_id + to_b(payload)
-
-    # Base: PUBLISH + QoS1
-    header = 0x30 | (1 << 1)   # 0x32
-
-    if dup:
-        header |= 0x08  # set DUP bit
-
-    pkt = bytes([header]) + mqtt_encode_varint(len(pl)) + pl
-    return pkt
-
-def build_ping(last_ping, keep_alive):
-    """Send ping to server every so often."""
-    now = asyncio.get_event_loop().time()
-    if now - last_ping >= keep_alive:
-        req = MQTTPacket(MQTTEnum.PINGREQ)
-        buf = req.build()
-        return now, buf
-    
-    return now, None
-
-def build_puback(packet_id):
-    """Sends the 4-byte MQTT PUBACK to the broker."""
-    buf = bytes([0x40, 0x02]) + packet_id
-    return buf
     
 if __name__ == "__main__":
     topic = "test/topic"

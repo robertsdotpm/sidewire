@@ -1,4 +1,3 @@
-import hashlib
 from ecdsa import VerifyingKey, SECP256k1, util
 from aionetiface import *
 

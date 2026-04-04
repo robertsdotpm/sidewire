@@ -17,6 +17,7 @@ from ..signing import *
 from .mqtt_packet import *
 from .app_packet import *
 from .app_proto import *
+from .mqtt_msgs import *
 
 # mqtt_packet_reader sends full packets to this func to handle.
 async def handle_mqtt_packet(client, packet):

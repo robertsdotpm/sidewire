@@ -15,6 +15,7 @@ from .mqtt_packet import *
 from .mqtt_ordered_send import *
 from .mqtt_dispatch import *
 from .mqtt_reader import *
+from .mqtt_msgs import *
 
 # Connect to MQTT server, subcribe to our public key hex.
 # Setup stream-based packet reconstruction handler.

@@ -18,6 +18,7 @@ from aionetiface import *
 from .mqtt_connect import *
 from .mqtt_packet import *
 from .utils import *
+from .mqtt_msgs import *
 
 # Cleanup handled by mqtt_client.close.
 async def dispatcher(client, republish_duration, interval, keep_alive, ignore_acked=False, reconnect_delay=0):
