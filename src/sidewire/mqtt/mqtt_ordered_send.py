@@ -33,11 +33,14 @@ def ordered_ack_send(client, msg, dest_pk_hex, pipe_id_hex, msg_type=MsgEnum.MSG
     assert(len(dest_pk_hex) == 66)
 
     # Duplicate messages may be a bug by the caller.
-    sent_msg_id = hashlib.sha256(to_b(msg)).hexdigest()
-    if sent_msg_id in client.sent_msg_ids:
-        er = "msg id in sent msg ids in ordered send, is this intended? "
-        er += sent_msg_id
-        log(er)
+    if msg_type == MsgEnum.MSG:
+        sent_msg_id = hashlib.sha256(to_b(msg)).hexdigest()
+        if sent_msg_id in client.sent_msg_ids:
+            er = "msg id in sent msg ids in ordered send, is this intended? "
+            er += sent_msg_id
+            log(er)
+        else:
+            client.sent_msg_ids[sent_msg_id] = 1
 
     # Create queue per pipe ID.
     if pipe_id_hex not in client.msg_queues[msg_type]:

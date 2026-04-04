@@ -2,51 +2,61 @@ import hashlib
 from aionetiface import *
 from .mqtt_defs import *
 
+# Function called for new application (type=msg) publishes.
 async def process_app_msg(client, app_packet):
-    """Processes a new application message and sends back a MSGACK."""
-    
-    # Using the integer directly from the object
+    # Using the integer directly from the object.
     seq_no = app_packet.seq_no
     pipe_id = app_packet.pipe_id_hex
     src_pk = app_packet.src_pk_hex
     msg = app_packet.msg
 
-    # 1. Deduplication (Include seq_no in hash to allow identical text)
-    # Using the property for the hex string version
-    dedupe_str = msg + app_packet.seq_no_hex
-    msg_hash = hashlib.sha256(to_b(dedupe_str)).hexdigest()
-    
-    if msg_hash in client.sent_msg_ids:
+    # Don't allow handlers to be called for msg portions that have
+    # already been processed -- we raise an error in queue func too.
+    msg_hash = hashlib.sha256(to_b(msg)).hexdigest()
+    if msg_hash in client.recv_msg_ids:
         return
-    client.sent_msg_ids[msg_hash] = 1
+    else:
+        client.recv_msg_ids[msg_hash] = 1
 
-    # 2. Cleanup old ACKs for this pipe
+    """
+    Since flow is: send 0, get ack 0, send 1 ...
+    When we receive the next message it means the other side received our ack
+    for a past message. Hence, we no longer need to keep sending those acks.
+    This code deletes any queued acks older than the current message sequence.
+    """
     msg_ack_queues = client.msg_queues[MsgEnum.MSGACK]
     if pipe_id in msg_ack_queues:
-        queue = msg_ack_queues[pipe_id]
+        # List of sequenced app-level ack metas.
+        ack_queue = msg_ack_queues[pipe_id]
         
-        # Cleanup logic: remove older sequences
-        for old_seq in list(queue.keys()):
+        # Remove queued application acks that are no longer relevant.
+        for old_seq in list(ack_queue.keys()):
             if old_seq < seq_no:
-                del queue[old_seq]
+                del ack_queue[old_seq]
         
-        # 3. Optimization: If we already ACKed this specific seq, resend it
-        if seq_no in queue:
-            meta = queue[seq_no]
+        # If we already acked this in the past reuse existing queued app ack.
+        if seq_no in ack_queue:
+            # Structure for an app-level ack message.
+            meta = ack_queue[seq_no]
             out, packet_ack = client.publish(
                 meta["dest_pk_hex"], 
                 meta["out"],
             )
 
-            await async_wrap_errors(client.pipe.send(out))
+            # Republish the application ack to sender.
+            await async_wrap_errors(
+                client.pipe.send(out)
+            )
+
             return
 
-    # 4. Trigger registered app handlers
+    # Trigger registered app handlers
     for msg_handler in client.msg_handlers:
-        # Passing fields directly from the packet object
-        await async_wrap_errors(msg_handler(msg, src_pk, pipe_id, client))
+        await async_wrap_errors(
+            msg_handler(msg, src_pk, pipe_id, client)
+        )
 
-    # 5. Send Application ACK back to sender
+    # Send Application ACK back to sender
     try:
         client.queue_msg(
             "ack",
@@ -58,29 +68,30 @@ async def process_app_msg(client, app_packet):
     except Exception:
         log_exception()
 
+# Function called for new application (type=msgack) publishes.
 def process_app_ack(client, app_packet):
-    """Handles an application-level ACK to clear the sender's queue."""
     # Pull fields directly from the object
     pipe_id = app_packet.pipe_id_hex
     seq_no = app_packet.seq_no
     src_pk = app_packet.src_pk_hex
 
-    # Check if we even have a queue for this pipe
+    # Check if we even have a queue for this pipe ID.
     if pipe_id not in client.msg_queues[MsgEnum.MSG]:
         return
     
+    # Check sequence exists.
     msg_queue = client.msg_queues[MsgEnum.MSG][pipe_id]
+    if seq_no not in msg_queue:
+        return
+        
+    # Security: Ensure the ACK came from the person we sent the MSG to
+    msg_meta = msg_queue[seq_no]
+    if msg_meta["dest_pk_hex"] != src_pk:
+        return
     
-    if seq_no in msg_queue:
-        msg_meta = msg_queue[seq_no]
-        
-        # Security: Ensure the ACK came from the person we sent the MSG to
-        if msg_meta["dest_pk_hex"] != src_pk:
-            return
-        
-        # Avoid setting result on a future that is already finished
-        if msg_meta["app_ack"].done():
-            return
-        
-        # Mark the application-level future as successful
-        msg_meta["app_ack"].set_result(True)
+    # Avoid setting result on a future that is already finished
+    if msg_meta["app_ack"].done():
+        return
+    
+    # Mark the application-level future as successful
+    msg_meta["app_ack"].set_result(True)

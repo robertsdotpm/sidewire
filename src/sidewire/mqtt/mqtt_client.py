@@ -75,6 +75,7 @@ class MQTTClient:
 
         # Msg part unpacked from the full proto over publish.
         self.sent_msg_ids = {}
+        self.recv_msg_ids = {}
 
         # Record in-flight packets by IDs that map to futures on server ack.
         # [packet enum][packet id] = Future
