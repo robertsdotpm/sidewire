@@ -29,6 +29,7 @@ the math needs to be log(u, e).
 from aionetiface import *
 from .mqtt import *
 from .signing import *
+from .smart_pipe import *
 from .utils import *
 
 class Router:
@@ -56,6 +57,12 @@ class Router:
             self.servers,
             self.clients
         )
+    
+    # Smart pipe intelligently routes over a set of MQTT clients.
+    async def pipe(self, dest_pub_hex):
+        pipe = SmartPipe(dest_pub_hex)
+        await pipe.connect()
+        return pipe
     
 
 async def workspace():
