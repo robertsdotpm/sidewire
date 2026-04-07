@@ -4,46 +4,72 @@ import math
 import copy
 import asyncio
 
-def rendezvous_hash(nic, pub_key_hex, servers):
+def get_server_score(af, host, pub_key_hex):
+    """
+    Calculates the rendezvous score for a specific server.
+    """
+    # Starting value to run through scoring func.
+    h = hashlib.sha256(
+        bytes([int(af)]) + 
+        h_to_b(pub_key_hex) + 
+        to_b(host)
+    ).digest()
+
+    # Convert hex to an integer.
+    int_hash = int.from_bytes(h, 'big')
+
+    """
+    Converts massive int 256 bit value into range from 1 to < 1
+    as a decimal. This is used for the next trick with log.
+    """
+    one_or_less = (int_hash + 1) / (2 ** 256)
+
+    """
+    When a number is less than one: math.log expands differences.
+    They all fit on the same line so large numbers don't adversely
+    effect clustering of final values. The field ends up being fair.
+    """
+    even_playing_field = -math.log(one_or_less)
+    
+    return even_playing_field
+
+def interleave_buckets(af_buckets):
+    """
+    Interleaves the results to guarantee diversity in the top N.
+    This ensures IPv4 and IPv6 servers both appear at the start of the list.
+    """
+    # Max len calculation.
+    max_lengths = [len(bucket) for bucket in af_buckets.values()]
+    max_len = max(max_lengths) if max_lengths else 0
     process_list = []
+    for i in range(max_len):
+        # Sorted keys for consistency across nodes
+        for af in sorted(af_buckets.keys()):
+            if i < len(af_buckets[af]):
+                process_list.append(af_buckets[af][i])
+    
+    return process_list
+
+def rendezvous_hash(nic, pub_key_hex, servers):
+    # We use a dict to group scores by Address Family.
+    af_buckets = {} 
     for af in nic.supported():
+        af_buckets[af] = []
         for host in servers[af]:
             # Record server to score.
             server = copy.deepcopy(servers[af][host])
-            process_list.append(server)
 
-            # Starting value to run through scoring func.
-            h = hashlib.sha256(
-                bytes([int(af)]) + 
-                h_to_b(pub_key_hex) + 
-                to_b(host)
-            ).digest()
+            # Record score for server using the split-out scoring function.
+            server["score"] = get_server_score(af, host, pub_key_hex)
+            af_buckets[af].append(server)
 
-            # Convert hex to an integer.
-            int_hash = int.from_bytes(h, 'big')
+        # Sort each individual AF bucket by score as we finish it.
+        af_buckets[af].sort(key=lambda v: v["score"])
 
-            """
-            Converts massive int 256 bit value into range from 1 to < 1
-            as a decimal. This is used for the next trick with log.
-            """
-            one_or_less = (int_hash + 1) / (2 ** 256)
+    # Final interleaving to ensure protocol diversity.
+    return interleave_buckets(af_buckets)
 
-            """
-            When a number is less than one: math.log expands differences.
-            They all fit on the same line so large numbers don't adversely
-            effect clustering of final values. The field ends up being fair.
-            """
-            even_playing_field = -math.log(one_or_less)
-
-            # optional weighting:
-            # score /= server.get("weight", 1)
-
-            # Record score for server.
-            server["score"] = even_playing_field
-
-    # Now sort process list by smallest scores first.
-    return sorted(process_list, key=lambda v: v["score"])
-
+# Throws timeout on TCP error or other exceptions on proto error.
 async def ensure_clients_connected(clients, timeout=4):
     async def worker(client):
         try:
@@ -63,10 +89,14 @@ async def ensure_clients_connected(clients, timeout=4):
 
 async def find_dest_in_servers(clients, dest_pub_hex, timeout=3):
     async def worker(client):
+        # Skip not started.
         if client.dispatcher_task is None:
             return None
         
+        # Queue any arbitrary unique message.
         _, ack = client.queue_msg("hello", dest_pub_hex)
+
+        # Wait for an acknowledgement.
         try:
             await asyncio.wait_for(ack, timeout)
             return client
@@ -77,26 +107,26 @@ async def find_dest_in_servers(clients, dest_pub_hex, timeout=3):
     results = await asyncio.gather(*tasks)
     return strip_none(results)
 
-async def get_dest_clients(nic, dest_pub_hex, servers, clients, n=3, max_servers=20):
-    clients = []
+async def get_dest_clients(nic, dest_pub_hex, servers, clients_map, n=4, max_servers=20):
+    candidate_clients = []
     sorted_servers = rendezvous_hash(nic, dest_pub_hex, servers)
     for server in sorted_servers:
         af = server["af"]
         host = server["host"]
-        client = clients[af][host]
-        clients.append(client)
+        client = clients_map[af][host]
+        candidate_clients.append(client)
 
     # Build a list of clients that converge with dest_pub_hex.
     found_clients = []
     tried_servers = 0
     while len(found_clients) < n and tried_servers < max_servers:
-        # Build next list of candidates from head of clients.
+        # Build next list of candidates from head of candidate_clients.
         candidates = []
 
         # Calculate batch size with respect to n, remaining, and max_servers.
         batch_size = min(
             n - len(found_clients),
-            len(clients),
+            len(candidate_clients),
             max_servers - tried_servers
         )
         if not batch_size:
@@ -104,7 +134,7 @@ async def get_dest_clients(nic, dest_pub_hex, servers, clients, n=3, max_servers
 
         # Try the next list of servers to find dest at.
         for _ in range(0, batch_size):
-            candidates.append(clients.pop(0))
+            candidates.append(candidate_clients.pop(0))
 
         # Update tried server count.
         tried_servers += batch_size

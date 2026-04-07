@@ -8,12 +8,22 @@ several benefits:
 - Using the public key to yield a server list is adaptive to epemeral server
 faults since deterministic ordering eventually may intersect a new server
 - All of this takes place without coordination
+- Easy to adapt to multiple address families
 
-SHA256 already produces uniformly distributed values, but using -log(U) 
-transforms them into an exponential distribution. This allows fair and mathematically
-correct weighted selection, where servers with higher weights are more likely
-to appear earlier in the ordering. The benefit is not just spacing, but
-enabling proper probabilistic behavior for ranking and convergence.
+We use interleaving between server address families. This means the best IPv4
+server is 0, then the best IPv6, then the second best IPv4, and so on. So you
+can stream this sorted list to a connect process to easily converge on connected
+clients regardless of what address families a NIC supports. Convergence is still
+possible if at least one address families is shared.
+
+The sorting algorithm uses SHA256 to produce uniformly distributed values, 
+but using -log(U)  transforms them into an exponential distribution. This allows
+fair and mathematically correct weighted selection, where servers with higher
+weights are more likely to appear earlier in the ordering. The benefit is not just
+spacing, but enabling proper probabilistic behavior for ranking and convergence.
+
+Note: can just use sha256 sorted n but if weights are to be used in the future then
+the math needs to be log(u, e).
 """
 
 from aionetiface import *
@@ -40,7 +50,7 @@ class Router:
             
     # Same function reusable by both sides.
     async def start(self):
-        await get_dest_clients(
+        return await get_dest_clients(
             self.nic,
             self.kp.public_key_hex,
             self.servers,
