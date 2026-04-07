@@ -70,7 +70,7 @@ def rendezvous_hash(nic, pub_key_hex, servers):
     return interleave_buckets(af_buckets)
 
 # Throws timeout on TCP error or other exceptions on proto error.
-async def ensure_clients_connected(clients, timeout=4):
+async def ensure_clients_connected(clients, timeout=3):
     async def worker(client):
         try:
             if client.dispatcher_task is None:

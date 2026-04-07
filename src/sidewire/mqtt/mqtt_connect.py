@@ -20,6 +20,10 @@ from .mqtt_msgs import *
 # Connect to MQTT server, subcribe to our public key hex.
 # Setup stream-based packet reconstruction handler.
 async def mqtt_connect(self, keep_alive):
+    # Incompatible AF.
+    if self.af not in self.nic.supported():
+        raise Exception("NIC cant use mqtt AF.")
+
     """
     In MQTT the client ID determines offline saved message queues.
     Normally MQTT clients reuse IDs to get offline messages but here since
