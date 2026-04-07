@@ -52,7 +52,6 @@ def interleave_buckets(af_buckets):
 
 def rendezvous_hash(nic, pub_key_hex, servers):
     # We use a dict to group scores by Address Family.
-    # Nodes don't end up having lists for servers they can't reach.
     af_buckets = {} 
     for af in nic.supported():
         af_buckets[af] = []
@@ -115,6 +114,7 @@ async def get_dest_clients(nic, dest_pub_hex, servers, clients_map, n=4, max_ser
         af = server["af"]
         host = server["host"]
         client = clients_map[af][host]
+        candidate_clients.append(client)
 
     # Build a list of clients that converge with dest_pub_hex.
     found_clients = []

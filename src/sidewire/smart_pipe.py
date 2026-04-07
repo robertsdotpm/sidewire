@@ -7,6 +7,7 @@ by asyncio itself.
 
 from .utils import *
 import asyncio
+import copy
 
 class SmartPipe:
     def __init__(self, router, dest_pub_hex):
@@ -14,7 +15,6 @@ class SmartPipe:
         self.dest_pub_hex = dest_pub_hex
         self.clients = []
 
-    # TODO: register message receiver callback.
     async def connect(self, msg_cb=None):
         self.clients = await get_dest_clients(
             self.router.nic,
@@ -23,11 +23,15 @@ class SmartPipe:
             self.router.clients
         )
 
+        for client in self.clients:
+            client.add_msg_handler(msg_cb)
+
         return self
 
-    async def send(self, msg, timeout=3):
+    async def send(self, msg, timeout=4):
         for client in self.clients:
-            _, ack_msg = await client.queue_msg(
+            print("queue attempt")
+            _, ack_msg = client.queue_msg(
                 msg,
                 self.dest_pub_hex
             )
@@ -38,4 +42,9 @@ class SmartPipe:
             except asyncio.TimeoutError:
                 continue
 
+
         return 0
+    
+    async def close(self):
+        for client in self.clients:
+            await client.close()

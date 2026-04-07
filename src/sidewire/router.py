@@ -24,6 +24,9 @@ spacing, but enabling proper probabilistic behavior for ranking and convergence.
 
 Note: can just use sha256 sorted n but if weights are to be used in the future then
 the math needs to be log(u, e).
+
+If a server is down, maybe have a flag that disables it from reconnect retry in the
+code otherwise it blocks the whole program for servers it already knows are down.
 """
 
 from aionetiface import *
@@ -59,10 +62,9 @@ class Router:
         )
     
     # Smart pipe intelligently routes over a set of MQTT clients.
-    async def pipe(self, dest_pub_hex):
-        pipe = SmartPipe(dest_pub_hex)
-        await pipe.connect()
-        return pipe
+    def pipe(self, dest_pub_hex):
+        smart_pipe = SmartPipe(self, dest_pub_hex)
+        return smart_pipe
     
 
 async def workspace():
@@ -98,6 +100,16 @@ async def workspace():
     #print(out)
     out = await router.start()
     print(out)
+
+    async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+        print("got ", msg, " from ", src_pk_hex)
+
+    pipe = router.pipe(router.kp.public_key_hex)
+    await pipe.connect(msg_handler)
+    await pipe.send("hello world")
+
+    await asyncio.sleep(5)
+    await pipe.close()
 
 
 
