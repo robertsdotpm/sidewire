@@ -1,7 +1,7 @@
 import hashlib
 from aionetiface import *
 from .utils import *
-from .base_msg import *
+from ....p2pd.src.p2pd.protocol.base_msg import *
 from .mqtt import *
 
 class SignalRouter():

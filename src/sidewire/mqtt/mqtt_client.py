@@ -36,6 +36,8 @@ module files:
     - send out queued messages and reconnect on con lost - mqtt dispatcher
     - handle connection in detail - mqtt connect
     - craft and unpack various mqtt packets - mqtt packet
+
+Everything ended up under 700 lines of code which I think is pretty good!
 """
 
 import hashlib
