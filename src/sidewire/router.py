@@ -20,7 +20,7 @@ class Router:
                     self.kp
                 )
 
-    async def get_dest_clients(self, dest_pub_hex, n=3):
+    async def get_dest_clients(self, dest_pub_hex, n=3, max_servers=20):
         clients = []
         sorted_servers = rendezvous_hash(self.nic, dest_pub_hex, self.servers)
         for server in sorted_servers:
@@ -31,15 +31,26 @@ class Router:
 
         # Build a list of clients that converge with dest_pub_hex.
         found_clients = []
-        while len(found_clients) < n:
+        tried_servers = 0
+        while len(found_clients) < n and tried_servers < max_servers:
             # Build next list of candidates from head of clients.
             candidates = []
-            for _ in range(0, min(n - len(found_clients), len(clients))):
+
+            # Calculate batch size with respect to n, remaining, and max_servers.
+            batch_size = min(
+                n - len(found_clients),
+                len(clients),
+                max_servers - tried_servers
+            )
+            if not batch_size:
+                break
+
+            # Try the next list of servers to find dest at.
+            for _ in range(0, batch_size):
                 candidates.append(clients.pop(0))
 
-            # Failed to find dest on any server.
-            if not len(candidates):
-                return found_clients          
+            # Update tried server count.
+            tried_servers += batch_size
         
             # Ensure clients are connected.
             await ensure_clients_connected(candidates)

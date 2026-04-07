@@ -44,11 +44,14 @@ def rendezvous_hash(nic, pub_key_hex, servers):
     # Now sort process list by smallest scores first.
     return sorted(process_list, key=lambda v: v["score"])
 
-async def ensure_clients_connected(clients):
+async def ensure_clients_connected(clients, timeout=4):
     async def worker(client):
         try:
             if client.dispatcher_task is None:
-                await client.connect()
+                await asyncio.wait_for(
+                    client.connect(),
+                    timeout
+                )
             
             return True
         except Exception:
