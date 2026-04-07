@@ -19,52 +19,15 @@ class Router:
                     (host, self.servers[af][host]["port"]),
                     self.kp
                 )
-
-    async def get_dest_clients(self, dest_pub_hex, n=3, max_servers=20):
-        clients = []
-        sorted_servers = rendezvous_hash(self.nic, dest_pub_hex, self.servers)
-        for server in sorted_servers:
-            af = server["af"]
-            host = server["host"]
-            client = self.clients[af][host]
-            clients.append(client)
-
-        # Build a list of clients that converge with dest_pub_hex.
-        found_clients = []
-        tried_servers = 0
-        while len(found_clients) < n and tried_servers < max_servers:
-            # Build next list of candidates from head of clients.
-            candidates = []
-
-            # Calculate batch size with respect to n, remaining, and max_servers.
-            batch_size = min(
-                n - len(found_clients),
-                len(clients),
-                max_servers - tried_servers
-            )
-            if not batch_size:
-                break
-
-            # Try the next list of servers to find dest at.
-            for _ in range(0, batch_size):
-                candidates.append(clients.pop(0))
-
-            # Update tried server count.
-            tried_servers += batch_size
-        
-            # Ensure clients are connected.
-            await ensure_clients_connected(candidates)
-
-            # Check to see if dest is on any of the candidate servers.
-            results = await find_dest_in_servers(candidates, dest_pub_hex)
-            if results:
-                found_clients += results
-
-        return found_clients
             
     # Same function reusable by both sides.
     async def start(self):
-        await self.get_dest_clients(self.kp.public_key_hex)
+        await get_dest_clients(
+            self.nic,
+            self.kp.public_key_hex,
+            self.servers,
+            self.clients
+        )
     
 
 async def workspace():
@@ -98,7 +61,7 @@ async def workspace():
 
     #out = router.rendezvous_hash(kp.public_key_hex)
     #print(out)
-    out = await router.get_dest_clients(router.kp.public_key_hex)
+    out = await router.start()
     print(out)
 
 
