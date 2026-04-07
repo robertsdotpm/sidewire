@@ -2,6 +2,7 @@ from aionetiface import *
 import hashlib
 import math
 import copy
+import asyncio
 
 def rendezvous_hash(nic, pub_key_hex, servers):
     process_list = []
@@ -42,3 +43,24 @@ def rendezvous_hash(nic, pub_key_hex, servers):
 
     # Now sort process list by smallest scores first.
     return sorted(process_list, key=lambda v: v["score"])
+
+async def ensure_clients_connected(clients):
+    async def worker(client):
+        if client.pipe is None:
+            await client.connect()
+
+    tasks = [worker(client) for client in clients]
+    await asyncio.gather(*tasks)
+
+async def ensure_found_dest(clients, dest_pub_key, timeout=3):
+    async def worker(client):
+        ack = client.queue_msg("hello", dest_pub_key)
+        try:
+            await asyncio.wait_for(ack, timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+    
+    tasks = [worker(client) for client in clients]
+    results = await asyncio.gather(*tasks)
+    return True in results

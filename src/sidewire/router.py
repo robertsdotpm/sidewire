@@ -1,6 +1,7 @@
 from aionetiface import *
 from .mqtt import *
 from .signing import *
+from .utils import *
 import hashlib
 import math
 import copy
@@ -21,6 +22,25 @@ class Router:
                     (host, self.servers[af][host]["port"]),
                     self.kp
                 )
+
+    async def get_dest_clients(self, dest_pub_hex, n=3):
+        clients = []
+        sorted_servers = rendezvous_hash(self.nic, dest_pub_hex, self.servers)
+        for server in sorted_servers:
+            af = server["af"]
+            host = server["host"]
+            client = self.clients[af][host]
+            clients.append(client)
+
+        # Build a list of clients that converge with dest_pub_hex.
+        while len(clients):
+            candidates = []
+            for _ in range(0, n):
+                candidates.append(clients.pop(0))
+
+            await ensure_clients_connected(clients)
+            found_dest 
+    
 
 async def workspace():
     print("workspace.")
@@ -45,14 +65,17 @@ async def workspace():
             else:
                 host = server_list[0]["ip"]
 
+            server_list[0]["host"] = host
             servers[af_txt][host] = server_list[0]
 
     kp = Signing.keypair()
     router = Router(nic, kp, servers)
 
-    out = router.rendezvous_hash(kp.public_key_hex)
-    print(out)
+    #out = router.rendezvous_hash(kp.public_key_hex)
+    #print(out)
 
+    dest_clients = router.get_dest_clients(kp.public_key_hex)
+    print(dest_clients)
 
 
 if __name__ == "__main__":

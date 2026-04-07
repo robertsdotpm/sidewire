@@ -142,7 +142,8 @@ class MQTTClient:
     # High level function: send a message to a dest pub key hash (topic.)
     # Puts the msg in a sequenced queue called queue_id_hex to be republished.
     # A background dispatcher task loops over these queues to repub messages.
-    def queue_msg(self, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
+    def queue_msg(self, msg, dest_pk_hex, queue_id_hex=None, msg_type=MsgEnum.MSG, seq_no=None):
+        queue_id_hex = queue_id_hex or to_h(rand_b(32))
         return ordered_ack_send(
             self,
             msg,
