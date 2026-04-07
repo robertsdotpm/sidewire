@@ -1,3 +1,22 @@
+"""
+Given a remote hex pub key: determines a list of MQTT clients that the dest is on.
+It uses a probablistic algorithm based on rendezvous hashing. This approach has
+several benefits:
+
+- Neither side needs to know the others server list
+- Server lists may change, offsets may change, fixed servers may go down
+- Using the public key to yield a server list is adaptive to epemeral server
+faults since deterministic ordering eventually may intersect a new server
+- All of this takes place without coordination
+
+The math uses natural logarithms to convert a large hash int into values more
+evenly distributed. Using sha256 directly with sort wouldn't guarantee output
+numbers are evenly distributed with respect to the fixed servers and pub key hashes.
+Log has that properly that numbers < 1 are spaced out evenly. Even if they are
+initially "close" together. That makes it perfect for this kind of "relative"
+hashing function.
+"""
+
 from aionetiface import *
 from .mqtt import *
 from .signing import *
