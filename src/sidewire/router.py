@@ -2,9 +2,6 @@ from aionetiface import *
 from .mqtt import *
 from .signing import *
 from .utils import *
-import hashlib
-import math
-import copy
 
 class Router:
     def __init__(self, nic, kp, servers):
@@ -33,13 +30,30 @@ class Router:
             clients.append(client)
 
         # Build a list of clients that converge with dest_pub_hex.
-        while len(clients):
+        found_clients = []
+        while len(found_clients) < n:
+            # Build next list of candidates from head of clients.
             candidates = []
-            for _ in range(0, n):
+            for _ in range(0, min(n - len(found_clients), len(clients))):
                 candidates.append(clients.pop(0))
 
-            await ensure_clients_connected(clients)
-            found_dest 
+            # Failed to find dest on any server.
+            if not len(candidates):
+                return found_clients          
+        
+            # Ensure clients are connected.
+            await ensure_clients_connected(candidates)
+
+            # Check to see if dest is on any of the candidate servers.
+            results = await find_dest_in_servers(candidates, dest_pub_hex)
+            if results:
+                found_clients += results
+
+        return found_clients
+            
+    # Same function reusable by both sides.
+    async def start(self):
+        await self.get_dest_clients(self.kp.public_key_hex)
     
 
 async def workspace():
@@ -73,9 +87,9 @@ async def workspace():
 
     #out = router.rendezvous_hash(kp.public_key_hex)
     #print(out)
+    out = await router.get_dest_clients(router.kp.public_key_hex)
+    print(out)
 
-    dest_clients = router.get_dest_clients(kp.public_key_hex)
-    print(dest_clients)
 
 
 if __name__ == "__main__":

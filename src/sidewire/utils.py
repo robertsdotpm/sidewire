@@ -46,21 +46,27 @@ def rendezvous_hash(nic, pub_key_hex, servers):
 
 async def ensure_clients_connected(clients):
     async def worker(client):
-        if client.pipe is None:
-            await client.connect()
+        try:
+            if client.dispatcher_task is None:
+                await client.connect()
+            
+            return True
+        except Exception:
+            log_exception()
+            return False
 
     tasks = [worker(client) for client in clients]
     await asyncio.gather(*tasks)
 
-async def ensure_found_dest(clients, dest_pub_key, timeout=3):
+async def find_dest_in_servers(clients, dest_pub_hex, timeout=3):
     async def worker(client):
-        ack = client.queue_msg("hello", dest_pub_key)
+        _, ack = client.queue_msg("hello", dest_pub_hex)
         try:
             await asyncio.wait_for(ack, timeout)
-            return True
+            return client
         except asyncio.TimeoutError:
-            return False
+            return None
     
     tasks = [worker(client) for client in clients]
     results = await asyncio.gather(*tasks)
-    return True in results
+    return strip_none(results)
