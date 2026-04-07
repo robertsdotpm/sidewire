@@ -9,12 +9,11 @@ several benefits:
 faults since deterministic ordering eventually may intersect a new server
 - All of this takes place without coordination
 
-The math uses natural logarithms to convert a large hash int into values more
-evenly distributed. Using sha256 directly with sort wouldn't guarantee output
-numbers are evenly distributed with respect to the fixed servers and pub key hashes.
-Log has that properly that numbers < 1 are spaced out evenly. Even if they are
-initially "close" together. That makes it perfect for this kind of "relative"
-hashing function.
+SHA256 already produces uniformly distributed values, but using -log(U) 
+transforms them into an exponential distribution. This allows fair and mathematically
+correct weighted selection, where servers with higher weights are more likely
+to appear earlier in the ordering. The benefit is not just spacing, but
+enabling proper probabilistic behavior for ranking and convergence.
 """
 
 from aionetiface import *
