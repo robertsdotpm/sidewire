@@ -51,6 +51,7 @@ class Router:
                     (host, self.servers[af][host]["port"]),
                     self.kp
                 )
+                self.clients[af][host].last_connect = None
             
     # Same function reusable by both sides.
     async def start(self):

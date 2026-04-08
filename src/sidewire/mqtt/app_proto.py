@@ -10,19 +10,12 @@ async def process_app_msg(client, app_packet):
     src_pk = app_packet.src_pk_hex
     msg = app_packet.msg
 
-    # Don't allow handlers to be called for msg portions that have
-    # already been processed -- we raise an error in queue func too.
-    msg_hash = hashlib.sha256(to_b(msg)).hexdigest()
-    if msg_hash in client.recv_msg_ids:
-        return
-    else:
-        client.recv_msg_ids[msg_hash] = 1
-
     """
     Since flow is: send 0, get ack 0, send 1 ...
     When we receive the next message it means the other side received our ack
     for a past message. Hence, we no longer need to keep sending those acks.
     This code deletes any queued acks older than the current message sequence.
+    Note: only applies to sequenced messages in a queue.
     """
     msg_ack_queues = client.msg_queues[MsgEnum.MSGACK]
     if queue_id in msg_ack_queues:
@@ -50,11 +43,17 @@ async def process_app_msg(client, app_packet):
 
             return
 
-    # Trigger registered app handlers
-    for msg_handler in client.msg_handlers:
-        await async_wrap_errors(
-            msg_handler(msg, src_pk, queue_id, client)
-        )
+    # Don't allow handlers to be called for msg portions that have
+    # already been processed -- we raise an error in queue func too.
+    msg_hash = hashlib.sha256(to_b(msg)).hexdigest()
+    if msg_hash not in client.recv_msg_ids:
+        # Trigger registered app handlers
+        for msg_handler in client.msg_handlers:
+            await async_wrap_errors(
+                msg_handler(msg, src_pk, queue_id, client)
+            )
+
+        client.recv_msg_ids[msg_hash] = 1
 
     # Send Application ACK back to sender
     try:

@@ -16,12 +16,15 @@ class SmartPipe:
         self.clients = []
 
     async def connect(self, msg_cb=None):
+        
         self.clients = await get_dest_clients(
             self.router.nic,
             self.dest_pub_hex,
             self.router.servers,
             self.router.clients
         )
+
+        print(self.clients)
 
         for client in self.clients:
             client.add_msg_handler(msg_cb)

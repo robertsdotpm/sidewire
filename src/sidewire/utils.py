@@ -69,23 +69,30 @@ def rendezvous_hash(nic, pub_key_hex, servers):
     # Final interleaving to ensure protocol diversity.
     return interleave_buckets(af_buckets)
 
-# Throws timeout on TCP error or other exceptions on proto error.
-async def ensure_clients_connected(clients, timeout=3):
+async def ensure_clients_connected(clients, timeout=3, retry_duration=1200):
     async def worker(client):
+        # Check if already connected
+        if client.dispatcher_task is not None:
+            return True
+        
+        # Rate limiting: Check if we are allowed to retry yet
+        now = asyncio.get_event_loop().time()
+        if client.last_connect is not None:
+            if (now - client.last_connect) < retry_duration:
+                return False
+
+        # Attempt connection
         try:
-            if client.dispatcher_task is None:
-                await asyncio.wait_for(
-                    client.connect(),
-                    timeout
-                )
-            
+            # Update timestamp HERE to mark the start of an actual attempt
+            client.last_connect = now 
+            await asyncio.wait_for(client.connect(), timeout)
             return True
         except Exception:
             log_exception()
             return False
 
     tasks = [worker(client) for client in clients]
-    await asyncio.gather(*tasks)
+    return await asyncio.gather(*tasks)
 
 async def find_dest_in_servers(clients, dest_pub_hex, timeout=3):
     async def worker(client):
@@ -101,6 +108,7 @@ async def find_dest_in_servers(clients, dest_pub_hex, timeout=3):
             await asyncio.wait_for(ack, timeout)
             return client
         except asyncio.TimeoutError:
+            print("dest in servers timeout")
             return None
     
     tasks = [worker(client) for client in clients]
