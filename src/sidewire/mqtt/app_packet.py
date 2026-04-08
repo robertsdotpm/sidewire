@@ -3,23 +3,12 @@ from aionetiface import *
 
 class AppPacket:
     def __init__(self, src_pk_hex=None, sig_hex=None, queue_id_hex=None, 
-            seq_no=None, msg_type=None, msg=None):
+            msg_type=None, msg=None):
         self.src_pk_hex = src_pk_hex
         self.sig_hex = sig_hex
         self.queue_id_hex = queue_id_hex
-        self.seq_no = seq_no
         self.msg_type = msg_type
         self.msg = msg
-
-    @property
-    def seq_no_hex(self):
-        """Formats the integer sequence number into an 8-char hex string."""
-        if self.seq_no is None:
-            return None
-        
-        # Explicit format for Python 3.5+ compatibility
-        hex_string = "{:08x}".format(self.seq_no)
-        return hex_string
 
     def pack(self, client):
         """
@@ -36,7 +25,7 @@ class AppPacket:
         headered_msg = type_hex + self.msg
 
         # Signed message section.
-        signed_msg = self.queue_id_hex + self.seq_no_hex + headered_msg
+        signed_msg = self.queue_id_hex + headered_msg
         
         # Sign the binary representation of the hex string
         signed_msg_bytes = to_b(signed_msg)
@@ -58,7 +47,7 @@ class AppPacket:
         assert(isinstance(out, str))
         
         # Validation: src_pk(66) + sig(128) + pipe(64) + seq(8) = 266
-        header_overhead = 266
+        header_overhead = 258
         expected_len = header_overhead + len(headered_msg)
         assert(len(out) == expected_len)
         return out
@@ -94,8 +83,7 @@ class AppPacket:
         # Route to Application Logic
         # msg_data Layout: [queue_id(64)][seq(8)][type(2)][msg...]
         queue_id_hex = signed_msg_hex[:64]
-        seq_no_hex = signed_msg_hex[64:72]
-        app_payload = signed_msg_hex[72:]
+        app_payload = signed_msg_hex[64:]
         
         # Extract message type and actual content
         msg_type_hex = app_payload[:2]
@@ -104,12 +92,10 @@ class AppPacket:
         actual_msg = app_payload[2:]
 
         # Convert hex sequence back to integer
-        seq_no_int = int(seq_no_hex, 16)
         return cls(
             src_pk_hex=src_pk_hex,
             sig_hex=sig_hex,
             queue_id_hex=queue_id_hex,
-            seq_no=seq_no_int,
             msg_type=msg_type,
             msg=actual_msg
         )

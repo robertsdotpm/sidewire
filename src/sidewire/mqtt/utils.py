@@ -46,12 +46,10 @@ def packet_ack_future(client, packet_type):
 def iter_all_messages(msg_queues):
     # Queues are split by app msg type: MSG or MSGACK.
     for msg_type in msg_queues:
-        # Each plugin instance has a unique queue_id.
+        # Each message instance has a unique queue_id.
         for queue_id_hex in list(msg_queues[msg_type].keys()):
-            # Messages are further indexed by sequence (order.)
-            queue = msg_queues[msg_type][queue_id_hex]
-            for seq_no in sorted(queue.keys()):
-                yield queue[seq_no]
+            yield msg_queues[msg_type][queue_id_hex]
+
 
 # Resets protocol-level state for a fresh connection.
 def reset_session_state(client):
@@ -60,8 +58,8 @@ def reset_session_state(client):
 
     # Cancel and clear protocol-level ACKs (PUBACK/SUBACK)
     for packet_type in client.packet_ids:
-        for seq_no in client.packet_ids[packet_type]:
-            future = client.packet_ids[packet_type][seq_no]
+        for packet_id in client.packet_ids[packet_type]:
+            future = client.packet_ids[packet_type][packet_id]
             if not future.done():
                 future.set_exception(
                     ConnectionError("Connection lost for packet ACK")

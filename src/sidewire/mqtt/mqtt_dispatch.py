@@ -4,7 +4,6 @@ The Dispatcher is a background task that republishes queued messages at a set re
 To ensure reliability, the system prioritizes running the reconnect loop first to initialize the communication pipe, handling any subsequent failures via a connection_lost callback. Because Asyncio is reactive and only identifies a broken connection after a failed interaction, a ping feature is used to trigger earlier reconnections. To avoid synchronization failures, keep-alive intervals must be consistent across both endpoints, with retry attempts tuned as a function of the interval and keep-alive duration to ensure they fall within a valid reconnect cycle.
 """
 import asyncio
-import time
 import random
 from aionetiface import *
 from .mqtt_connect import *
@@ -29,6 +28,7 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
             # Process all messages in the queues.
             now = asyncio.get_event_loop().time()
             for meta in iter_all_messages(client.msg_queues):
+                #print(meta)
                 await republish_meta(
                     client, 
                     meta, 

@@ -28,12 +28,12 @@ async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republ
         client.pipe.sock.close()
 
     # Send a message.
-    pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
+    #pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
     for buf in msg_list:
         out, got_ack = client.queue_msg(
             buf,
             to_hs(client.kp.compact_public_key), # To self,
-            pipe_id_hex
+            #pipe_id_hex
         )
 
         #print(out, id(got_ack))
@@ -172,12 +172,12 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         bob_client.pipe.sock.close()
 
         # Send message to bob.
-        pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
+        #pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
         for buf in msg_list:
             _, got_ack = alice_client.queue_msg(
                 buf,
                 bob_client.kp.public_key_hex,
-                pipe_id_hex
+                #pipe_id_hex
             )
             
             await got_ack

@@ -28,7 +28,7 @@ from .mqtt_packet import *
 from .mqtt_proto import *
 from .app_packet import *
 
-def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
+def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MSG):
     assert(len(queue_id_hex) == 64)
     assert(len(dest_pk_hex) == 66)
 
@@ -43,19 +43,13 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
             client.sent_msg_ids[sent_msg_id] = 1
 
     # Create queue per pipe ID.
-    if queue_id_hex not in client.msg_queues[msg_type]:
-        client.msg_queues[msg_type][queue_id_hex] = {}
-
-    # Ensure no collisions for new messages.
-    if seq_no is None:
-        seq_no = len(client.msg_queues[msg_type][queue_id_hex])
+    assert(queue_id_hex not in client.msg_queues[msg_type])
     
     #print("order send seq no =", seq_no)
 
     # Use the new class to handle packing, signing, and header construction.
     packet = AppPacket(
         queue_id_hex=queue_id_hex,
-        seq_no=seq_no,
         msg_type=msg_type,
         msg=msg
     )
@@ -63,20 +57,14 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
     # This replaces the manual hex concatenation and signing block.
     out = packet.pack(client)
 
-    # Otherwise we'll overwrite an existing meta section.
-    assert(seq_no not in client.msg_queues[msg_type][queue_id_hex])
-
     # Message is queued by application type, high level pipe id, then seq.
     app_ack = asyncio.Future()
-    client.msg_queues[msg_type][queue_id_hex][seq_no] = {
+    client.msg_queues[msg_type][queue_id_hex] = {
         # Application-level ack -- allows to confirm msg delivery.
         "app_ack": app_ack,
 
         # Where to send the message to.
         "dest_pk_hex": dest_pk_hex,
-
-        # Allows for sequential send and ordering.
-        "seq_no": seq_no,
 
         # A serialized buffer of an app packet to put into a mqtt publish.
         "out": out,
@@ -92,4 +80,4 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
     }
     
     # Caller can await ack if they want.
-    return (queue_id_hex, seq_no), app_ack
+    return queue_id_hex, app_ack

@@ -67,7 +67,7 @@ class MQTTClient:
         # Handle received messages.
         self.msg_handlers = []
 
-        # Plugin message system [enum][pipe id][seq_no] = meta
+        # Plugin message system [enum][queue id] = meta
         # Used by the dispatcher task to republish messages.
         # The packet handler code in proto also sets futures here (app level ACKs.)
         self.msg_queues = {
@@ -150,9 +150,9 @@ class MQTTClient:
         return buf, packet_ack
     
     # High level function: send a message to a dest pub key hash (topic.)
-    # Puts the msg in a sequenced queue called queue_id_hex to be republished.
+    # Puts the msg in a queue called queue_id_hex to be republished.
     # A background dispatcher task loops over these queues to repub messages.
-    def queue_msg(self, msg, dest_pk_hex, queue_id_hex=None, msg_type=MsgEnum.MSG, seq_no=None):
+    def queue_msg(self, msg, dest_pk_hex, queue_id_hex=None, msg_type=MsgEnum.MSG):
         queue_id_hex = queue_id_hex or to_h(rand_b(32))
         return ordered_ack_send(
             self,
@@ -160,31 +160,18 @@ class MQTTClient:
             dest_pk_hex,
             queue_id_hex,
             msg_type,
-            seq_no
         )
     
     # Stops broadcasting a msg.
-    def dequeue_msg(self, queue_id_hex, seq_no=None, msg_type=MsgEnum.MSG):
+    # Could set exception on the old app ack future.
+    def dequeue_msg(self, queue_id_hex, msg_type=MsgEnum.MSG):
         # Get queue by queue id.
         queue = self.msg_queues[msg_type]
         if queue_id_hex not in queue:
             return
         
         # If no seq_no set delete the whole queue.
-        if seq_no is None:
-            del self.msg_queues[msg_type][queue_id_hex]
-            return
-        
-        # Otherwise: disable it to preserve seq_no offsets.
-        if seq_no not in self.msg_queues[msg_type][queue_id_hex]:
-            return
-        
-        # Get the app ack future.
-        app_ack = self.msg_queues[msg_type][queue_id_hex][seq_no]["app_ack"]
-        if app_ack.done():
-            return
-        
-        app_ack.set_result(True)
+        del self.msg_queues[msg_type][queue_id_hex]
 
     # Internal: used to publish signed messages to pub key hashed topics.
     # Returns packet and future to await ack for the packet from the server.

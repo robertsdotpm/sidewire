@@ -5,7 +5,6 @@ from .mqtt_defs import *
 # Function called for new application (type=msg) publishes.
 async def process_app_msg(client, app_packet):
     # Using the integer directly from the object.
-    seq_no = app_packet.seq_no
     queue_id = app_packet.queue_id_hex
     src_pk = app_packet.src_pk_hex
     msg = app_packet.msg
@@ -19,29 +18,19 @@ async def process_app_msg(client, app_packet):
     """
     msg_ack_queues = client.msg_queues[MsgEnum.MSGACK]
     if queue_id in msg_ack_queues:
-        # List of sequenced app-level ack metas.
-        ack_queue = msg_ack_queues[queue_id]
-        
-        # Remove queued application acks that are no longer relevant.
-        for old_seq in list(ack_queue.keys()):
-            if old_seq < seq_no:
-                del ack_queue[old_seq]
-        
         # If we already acked this in the past reuse existing queued app ack.
-        if seq_no in ack_queue:
-            # Structure for an app-level ack message.
-            meta = ack_queue[seq_no]
-            out, packet_ack = client.publish(
-                meta["dest_pk_hex"], 
-                meta["out"],
-            )
+        meta = msg_ack_queues[queue_id]
+        out, packet_ack = client.publish(
+            meta["dest_pk_hex"], 
+            meta["out"],
+        )
 
-            # Republish the application ack to sender.
-            await async_wrap_errors(
-                client.pipe.send(out)
-            )
+        # Republish the application ack to sender.
+        await async_wrap_errors(
+            client.pipe.send(out)
+        )
 
-            return
+        return
 
     # Don't allow handlers to be called for msg portions that have
     # already been processed -- we raise an error in queue func too.
@@ -62,7 +51,6 @@ async def process_app_msg(client, app_packet):
             src_pk,
             queue_id,
             MsgEnum.MSGACK,
-            seq_no=seq_no
         )
     except Exception:
         log_exception()
@@ -71,20 +59,14 @@ async def process_app_msg(client, app_packet):
 def process_app_ack(client, app_packet):
     # Pull fields directly from the object
     queue_id = app_packet.queue_id_hex
-    seq_no = app_packet.seq_no
     src_pk = app_packet.src_pk_hex
 
     # Check if we even have a queue for this pipe ID.
     if queue_id not in client.msg_queues[MsgEnum.MSG]:
         return
     
-    # Check sequence exists.
-    msg_queue = client.msg_queues[MsgEnum.MSG][queue_id]
-    if seq_no not in msg_queue:
-        return
-        
     # Security: Ensure the ACK came from the person we sent the MSG to
-    msg_meta = msg_queue[seq_no]
+    msg_meta = client.msg_queues[MsgEnum.MSG][queue_id]
     if msg_meta["dest_pk_hex"] != src_pk:
         return
     

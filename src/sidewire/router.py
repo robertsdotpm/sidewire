@@ -123,6 +123,9 @@ async def workspace():
 
     await router.close()
 
+"""
+dangling resource in te mqtt ping test code.
+"""
 
 
 if __name__ == "__main__":
