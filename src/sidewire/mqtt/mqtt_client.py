@@ -108,12 +108,18 @@ class MQTTClient:
     
     # Connect to MQTT server and subscribe to our own pub key hex topic.
     # Also will start a background task that dispatches messages from self.send.
-    async def connect(self, republish_duration=60, interval=5, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False, reconnect_delay=0):
+    async def connect(self, republish_duration=60, interval=5, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False, reconnect_delay=0, timeout=4):
         # Re-entry guard.
         if self.dispatcher_task:
             return self.pipe
         
-        pipe = await mqtt_connect(self, keep_alive)
+        # Connect with a timeout.
+        try:
+            pipe = await asyncio.wait_for(mqtt_connect(self, keep_alive), timeout)
+        except asyncio.TimeoutError:
+            raise ConnectionError("MQTT connection timeout.")
+        
+        # If it works start the background message dispatcher.
         if pipe and self.dispatcher_task is None:
             """
             As dispatcher also sets self.pipe for reconnect -- there is a race
@@ -157,6 +163,29 @@ class MQTTClient:
             seq_no
         )
     
+    # Stops broadcasting a msg.
+    def dequeue_msg(self, queue_id_hex, seq_no=None, msg_type=MsgEnum.MSG):
+        # Get queue by queue id.
+        queue = self.msg_queues[msg_type]
+        if queue_id_hex not in queue:
+            return
+        
+        # If no seq_no set delete the whole queue.
+        if seq_no is None:
+            del self.msg_queues[msg_type][queue_id_hex]
+            return
+        
+        # Otherwise: disable it to preserve seq_no offsets.
+        if seq_no not in self.msg_queues[msg_type][queue_id_hex]:
+            return
+        
+        # Get the app ack future.
+        app_ack = self.msg_queues[msg_type][queue_id_hex][seq_no]["app_ack"]
+        if app_ack.done():
+            return
+        
+        app_ack.set_result(True)
+
     # Internal: used to publish signed messages to pub key hashed topics.
     # Returns packet and future to await ack for the packet from the server.
     def publish(self, topic, payload, dup=False):

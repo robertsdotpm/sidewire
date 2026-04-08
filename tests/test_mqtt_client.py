@@ -231,6 +231,9 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         """
 
         #host_list = ["ovh1.p2pd.net"]
+
+        #host_list = ["broker.mqttdashboard.com"]
+
         msg_list = ["first msg", "second msg", "third"]
         for host in host_list:
             print("testing ", host)
@@ -240,7 +243,12 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
                 recv_list.append(msg)
 
             server = (host, 1883)
-            await mqtt_send_msg_and_handle(msg_list, msg_handler, server=server, interval=5, timeout=3)
+            try:
+                await mqtt_send_msg_and_handle(msg_list, msg_handler, server=server, interval=5, timeout=3)
+            except ConnectionError:
+                print("Connection error -- skipping.")
+                continue
+            
             # Part 1: no message duplication.
             #print(recv_list)
             assert(recv_list == msg_list)

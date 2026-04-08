@@ -92,4 +92,4 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
     }
     
     # Caller can await ack if they want.
-    return out, app_ack
+    return (queue_id_hex, seq_no), app_ack

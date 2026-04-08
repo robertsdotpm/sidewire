@@ -42,10 +42,16 @@ async def mqtt_connect(self, keep_alive):
     await pipe.send(connect_buf)
 
     # Expecting a standard 4-byte CONNACK (0x20 0x02 0x00 0x00)
-    connack = await asyncio.wait_for(pipe.recv_n(4), timeout=4)
+    try:
+        connack = await asyncio.wait_for(pipe.recv_n(4), timeout=4)
+    except asyncio.TimeoutError:
+        await pipe.close()
+        raise ConnectionError("conack timeout")
+
+    # Check protocol response for conack.
     if connack != b' \x02\x00\x00':
         await pipe.close()
-        raise BadProtoResp("Invalid MQTT CONNACK: {}".format(connack))
+        raise ConnectionError("Invalid MQTT CONNACK: {}".format(connack))
 
     #print("MQTT Connected: {}".format(self.client_id))
 
