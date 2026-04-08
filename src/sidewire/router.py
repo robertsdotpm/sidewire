@@ -43,6 +43,7 @@ class Router:
 
         # Build list of MQTT clients from server list.
         self.clients = {IP4: {}, IP6: {}}
+        self.recv_msg_ids = {}
         for af in (IP4, IP6):
             for host in self.servers[af]:
                 self.clients[af][host] = MQTTClient(
@@ -51,6 +52,11 @@ class Router:
                     (host, self.servers[af][host]["port"]),
                     self.kp
                 )
+
+                # Make all clients share the same recv_msg_ids queue.
+                self.clients[af][host].recv_msg_ids = self.recv_msg_ids
+
+                # Don't reconnect too frequently if server was down last.
                 self.clients[af][host].last_connect = None
             
     # Same function reusable by both sides.
@@ -66,6 +72,12 @@ class Router:
     def pipe(self, dest_pub_hex):
         smart_pipe = SmartPipe(self, dest_pub_hex)
         return smart_pipe
+    
+    async def close(self):
+        for af in self.clients:
+            for host in self.clients[af]:
+                client = self.clients[af][host]
+                await client.close()
     
 
 async def workspace():
@@ -109,8 +121,7 @@ async def workspace():
     await pipe.connect(msg_handler)
     await pipe.send("hello world")
 
-    await asyncio.sleep(5)
-    await pipe.close()
+    await router.close()
 
 
 
