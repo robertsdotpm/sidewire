@@ -7,7 +7,6 @@ by asyncio itself.
 
 from .utils import *
 import asyncio
-import copy
 
 class SmartPipe:
     def __init__(self, router, dest_pub_hex, clients=None):
@@ -33,52 +32,59 @@ class SmartPipe:
     async def send(self, msg, timeout=4):
         msg_id_hex = to_h(rand_b(32))
 
-        # Schedule all attempts concurrently
+        # Create all tasks upfront
         tasks = []
         for client in self.clients:
             _, ack_msg = client.queue_msg(msg, self.dest_pub_hex, msg_id_hex)
-            tasks.append(
-                asyncio.ensure_future(
-                    asyncio.wait_for(ack_msg, timeout)
-                )
+            task = asyncio.create_task(
+                asyncio.wait_for(ack_msg, timeout)
             )
+            tasks.append(task)
 
-        # Get first completed send that's acked.
-        result = 0
         try:
             while tasks:
                 done, pending = await asyncio.wait(
-                    tasks, 
+                    tasks,
                     return_when=asyncio.FIRST_COMPLETED
                 )
-                
+
                 for task in done:
                     try:
-                        # Check if this task finished successfully
-                        await task 
-                        result = len(msg)
+                        # Await result (will raise if failed)
+                        await task
 
-                        # We found our winner! Break the inner loop
-                        break 
-                    except (asyncio.TimeoutError, Exception):
-                        # Task error -- remove from list.
-                        if task in tasks:
-                            tasks.remove(task)
-                
-                # If we found a result, stop waiting for other tasks
-                if result > 0:
-                    break
+                        # Success: cancel everything else immediately
+                        for p in pending:
+                            p.cancel()
+
+                        # Optional: wait for cancellations to settle
+                        await asyncio.gather(*pending, return_exceptions=True)
+
+                        return len(msg)
+
+                    except asyncio.TimeoutError:
+                        # Ignore and continue
+                        pass
+                    except Exception:
+                        # Ignore but could log here
+                        pass
+
+                # Continue only with remaining tasks
+                tasks = list(pending)
+
         finally:
-            # Cleanup: Cancel any tasks that are still running
+            # Ensure all tasks are cleaned up
             for task in tasks:
                 if not task.done():
                     task.cancel()
 
-            # Remove all messages from being broadcast.
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Remove queued messages from all clients
             for client in self.clients:
                 client.dequeue_msg(msg_id_hex)
 
-        return result
+        return 0
     
     async def close(self):
         for client in self.clients:
