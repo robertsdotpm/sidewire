@@ -85,13 +85,11 @@ class Router:
             entry = self.cache[dest_pub_hex]
             if (now - entry["updated"]) < expiry:
                 cached_clients = entry["clients"]
-                print("reussing cached clients")
 
         # If we have cached_clients, we pass them in to skip discovery
         smart_pipe = SmartPipe(self, dest_pub_hex, clients=cached_clients)
         
         # Connect (this performs rendezvous discovery ONLY if clients is None)
-        #updated = now if len(smart_pipe).clients else 
         await smart_pipe.connect(msg_cb)
 
         # Update cache if we performed a fresh discovery or need to refresh
@@ -113,9 +111,6 @@ class Router:
                 client = self.clients[af][host]
                 await client.close()
 
-
-    
-
 async def workspace():
     nic = Interface("default")
     servers = get_mqtt_server_list()
@@ -135,7 +130,6 @@ async def workspace():
 """
 notes:
 dangling resource in te mqtt ping test code.
-router doesnt cache clients for a pub, could have an option.
 """
 
 
