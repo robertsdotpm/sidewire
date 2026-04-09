@@ -58,69 +58,78 @@ class Router:
 
                 # Don't reconnect too frequently if server was down last.
                 self.clients[af][host].last_connect = None
+
+        # Pub key hex -> {"updated", "clients"}
+        self.cache = {}
             
     # Same function reusable by both sides.
     async def start(self):
-        return await get_dest_clients(
+        clients = await get_dest_clients(
             self.nic,
             self.kp.public_key_hex,
             self.servers,
             self.clients
         )
+
+        # Cache own pub key -> clients mapping.
+        self.cache_clients(self.kp.public_key_hex, clients)
+        return clients
     
     # Smart pipe intelligently routes over a set of MQTT clients.
-    def pipe(self, dest_pub_hex):
-        smart_pipe = SmartPipe(self, dest_pub_hex)
+    async def pipe(self, dest_pub_hex, msg_cb=None, use_cache=False, expiry=3600):
+        now = asyncio.get_event_loop().time()
+        cached_clients = None
+
+        # Attempt to retrieve from cache
+        if use_cache and dest_pub_hex in self.cache:
+            entry = self.cache[dest_pub_hex]
+            if (now - entry["updated"]) < expiry:
+                cached_clients = entry["clients"]
+                print("reussing cached clients")
+
+        # If we have cached_clients, we pass them in to skip discovery
+        smart_pipe = SmartPipe(self, dest_pub_hex, clients=cached_clients)
+        
+        # Connect (this performs rendezvous discovery ONLY if clients is None)
+        #updated = now if len(smart_pipe).clients else 
+        await smart_pipe.connect(msg_cb)
+
+        # Update cache if we performed a fresh discovery or need to refresh
+        if use_cache and cached_clients is None:
+            self.cache_clients(dest_pub_hex, smart_pipe.clients)
+
         return smart_pipe
+    
+    def cache_clients(self, pub_key_hex, clients):
+        now = asyncio.get_event_loop().time()
+        self.cache[pub_key_hex] = {
+            "updated": now,
+            "clients": clients
+        }
     
     async def close(self):
         for af in self.clients:
             for host in self.clients[af]:
                 client = self.clients[af][host]
                 await client.close()
+
+
     
 
 async def workspace():
-    print("workspace.")
     nic = Interface("default")
-    print(nic.supported())
-    #print(INFRA["MQTT"])
-
-    servers = {
-        IP4: {},
-        IP6: {},
-    }
-    servers["IPv4"] = servers[IP4]
-    servers["IPv6"] = servers[IP6]
-
-    # Norm server list.
-    for af_txt in ("IPv4", "IPv6"):
-        for server_list in INFRA["MQTT"][af_txt]["UDP"]:
-            #print(server_list)
-            hosts = sorted(server_list[0]["fqns"])
-            if len(hosts):
-                host = hosts[0]
-            else:
-                host = server_list[0]["ip"]
-
-            server_list[0]["host"] = host
-            servers[af_txt][host] = server_list[0]
-
+    servers = get_mqtt_server_list()
     kp = Signing.keypair()
     router = Router(nic, kp, servers)
-
-    #out = router.rendezvous_hash(kp.public_key_hex)
-    #print(out)
     out = await router.start()
-    print(out)
+    print("our own clients", out)
 
     async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
         print("got ", msg, " from ", src_pk_hex)
 
-    pipe = router.pipe(router.kp.public_key_hex)
-    await pipe.connect(msg_handler)
+    # Already seen this client so shouldn't need to msg for liveliness.
+    pipe = await router.pipe(router.kp.public_key_hex, msg_handler, use_cache=True)
     await pipe.send("hello world")
-
     await router.close()
 
 """

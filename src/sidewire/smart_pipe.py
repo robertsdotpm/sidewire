@@ -10,24 +10,23 @@ import asyncio
 import copy
 
 class SmartPipe:
-    def __init__(self, router, dest_pub_hex):
+    def __init__(self, router, dest_pub_hex, clients=None):
         self.router = router
         self.dest_pub_hex = dest_pub_hex
-        self.clients = []
+        self.clients = clients or []
 
     async def connect(self, msg_cb=None):
+        if not len(self.clients):
+            self.clients = await get_dest_clients(
+                self.router.nic,
+                self.dest_pub_hex,
+                self.router.servers,
+                self.router.clients
+            )
 
-        self.clients = await get_dest_clients(
-            self.router.nic,
-            self.dest_pub_hex,
-            self.router.servers,
-            self.router.clients
-        )
-
-        print(self.clients)
-
-        for client in self.clients:
-            client.add_msg_handler(msg_cb)
+        if msg_cb:
+            for client in self.clients:
+                client.add_msg_handler(msg_cb)
 
         return self
 

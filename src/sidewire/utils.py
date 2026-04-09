@@ -159,3 +159,26 @@ async def get_dest_clients(nic, dest_pub_hex, servers, clients_map, n=4, max_ser
             found_clients += results
 
     return found_clients
+
+def get_mqtt_server_list(from_infra=INFRA["MQTT"]):
+    servers = {
+        IP4: {},
+        IP6: {},
+    }
+
+    servers["IPv4"] = servers[IP4]
+    servers["IPv6"] = servers[IP6]
+
+    # Norm server list.
+    for af_txt in ("IPv4", "IPv6"):
+        for server_list in from_infra[af_txt]["UDP"]:
+            hosts = sorted(server_list[0]["fqns"])
+            if len(hosts):
+                host = hosts[0]
+            else:
+                host = server_list[0]["ip"]
+
+            server_list[0]["host"] = host
+            servers[af_txt][host] = server_list[0]
+
+    return servers

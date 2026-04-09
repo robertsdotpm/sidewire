@@ -7,8 +7,9 @@ generic like a regular MQTT client. Instead it supports:
     are sent back to originating pub key hex channel
     - reliable delivery -- application level acks allow message delivery to be
     confirmed before moving to next message
-    - sequential messaging -- bare-bones MQTT servers vary; handling this at the
-    application level makes the code portable across servers and reliable 
+    - sequential messaging -- sequential messaging queues allow for culmulative
+    ack to keep ack spam to a minimum. Asyncio still sequences sends without
+    the need to use a specific message queue so this is optional.
 
 Technical notes:
     - client ID is intentionally random each time
