@@ -57,8 +57,6 @@ async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republ
         if not ack_await:
             await asyncio.sleep(2 * len(msg_list))
 
-    #await asyncio.sleep(5)
-
     # Cleanup.
     await client.close()
 
@@ -253,9 +251,24 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             #print(recv_list)
             assert(recv_list == msg_list)
 
+    async def test_interval_between_republish(self):
+        return
+        buf = "msg to send"
+        got_msg = asyncio.Event()
+
+        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+            print("in msg handler ", msg)
+            if msg == buf:
+                got_msg.set()
+
+        await mqtt_send_msg_and_handle([buf], msg_handler, ack_await=False)
+        assert(got_msg.is_set())
+
 
 if __name__ == '__main__':
     main()
 
 
 # A single file build for this is unncessary but cool.
+# test ping
+# test to see how often republish meta is rub witth different elapsed durations

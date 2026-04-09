@@ -59,6 +59,7 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
 
     # Message is queued by application type, high level pipe id, then seq.
     app_ack = asyncio.Future()
+    now = asyncio.get_event_loop().time()
     client.msg_queues[msg_type][queue_id_hex] = {
         # Application-level ack -- allows to confirm msg delivery.
         "app_ack": app_ack,
@@ -73,7 +74,7 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
         "updated": 0,
 
         # Created now.
-        "created": asyncio.get_event_loop().time(),
+        "created": now,
 
         #Track rebroadcast count.
         "amount": 0,

@@ -75,13 +75,18 @@ async def republish_meta(client, meta, now, interval, republish_duration, ignore
 
     # Don't rebroadcast if too soon.
     interval_elapsed = now - meta["updated"]
+    print(interval_elapsed, " ", current_backoff, " ", jittered_interval, " ", meta["out"])
     if interval_elapsed < jittered_interval:
+        print("a")
         return
 
     # Republish duration exceeded.
     total_elapsed = now - meta["created"]
     if total_elapsed >= republish_duration:
+        print("b")
         return
+    
+    print("c")
 
     # Increase state counters for THIS specific message.
     meta["updated"] = now
