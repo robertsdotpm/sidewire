@@ -101,7 +101,7 @@ async def find_dest_in_servers(clients, dest_pub_hex, timeout=3):
             return None
         
         # Queue any arbitrary unique message.
-        _, ack = client.queue_msg("hello", dest_pub_hex)
+        queue_id_hex, ack = client.queue_msg("hello", dest_pub_hex)
 
         # Wait for an acknowledgement.
         try:
@@ -110,6 +110,9 @@ async def find_dest_in_servers(clients, dest_pub_hex, timeout=3):
         except asyncio.TimeoutError:
             print("dest in servers timeout")
             return None
+        finally:
+            # Remove hello from queue.
+            client.dequeue_msg(queue_id_hex)
     
     tasks = [worker(client) for client in clients]
     results = await asyncio.gather(*tasks)

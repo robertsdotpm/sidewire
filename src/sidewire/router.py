@@ -123,6 +123,17 @@ async def workspace():
 
     await router.close()
 
+"""
+notes:
+dangling resource in te mqtt ping test code.
+ack spam is back now that seq is decoupled
+
+# A single file build for this is unncessary but cool.
+# test ping
+# test to see how often republish meta is rub witth different elapsed durations
+
+remove acks after m attempts
+"""
 
 
 if __name__ == "__main__":
