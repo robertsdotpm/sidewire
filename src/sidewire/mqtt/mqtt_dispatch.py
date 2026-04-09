@@ -71,23 +71,19 @@ async def republish_meta(client, meta, now, interval, republish_duration, ignore
 
     # Apply Full Jitter: randomize the wait to prevent "thundering herd" 
     # if multiple messages were queued at once.
-    jittered_interval = random.uniform(interval, current_backoff)
+    jittered_interval = random.uniform(0, current_backoff)
 
     # Don't rebroadcast if too soon.
     interval_elapsed = now - meta["updated"]
-    print(interval_elapsed, " ", current_backoff, " ", jittered_interval, " ", meta["out"])
     if interval_elapsed < jittered_interval:
-        print("a")
         return
 
     # Republish duration exceeded.
     total_elapsed = now - meta["created"]
     if total_elapsed >= republish_duration:
-        print("b")
         return
     
-    print("c")
-    
+    #print(interval_elapsed, " ", current_backoff, " ", jittered_interval, " ", meta["out"])
     # Increase state counters for THIS specific message.
     meta["updated"] = now
     meta["attempts"] = attempts + 1

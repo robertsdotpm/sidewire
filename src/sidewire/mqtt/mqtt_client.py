@@ -108,7 +108,7 @@ class MQTTClient:
     
     # Connect to MQTT server and subscribe to our own pub key hex topic.
     # Also will start a background task that dispatches messages from self.send.
-    async def connect(self, republish_duration=60, interval=5, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False, reconnect_delay=0, timeout=4):
+    async def connect(self, republish_duration=60, interval=2, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False, reconnect_delay=0, timeout=4):
         # Re-entry guard.
         if self.dispatcher_task:
             return self.pipe

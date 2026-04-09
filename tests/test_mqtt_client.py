@@ -57,7 +57,7 @@ async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republ
         if not ack_await:
             await asyncio.sleep(2 * len(msg_list))
 
-    #await asyncio.sleep(5)
+    await asyncio.sleep(100)
 
     # Cleanup.
     await client.close()
@@ -252,6 +252,17 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             # Part 1: no message duplication.
             #print(recv_list)
             assert(recv_list == msg_list)
+
+    async def test_repub_intervals(self):
+        buf = "msg to send"
+        got_msg = asyncio.Event()
+
+        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+            if msg == buf:
+                got_msg.set()
+
+        await mqtt_send_msg_and_handle([buf], msg_handler, ack_await=False)
+        assert(got_msg.is_set())
 
 
 if __name__ == '__main__':
