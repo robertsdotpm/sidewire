@@ -57,8 +57,6 @@ async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republ
         if not ack_await:
             await asyncio.sleep(2 * len(msg_list))
 
-    await asyncio.sleep(100)
-
     # Cleanup.
     await client.close()
 
@@ -270,3 +268,11 @@ if __name__ == '__main__':
 
 
 # A single file build for this is unncessary but cool.
+"""
+test_repub_intervals (__main__.TestMQTTClient.test_repub_intervals) ... /usr/lib/python3.12/asyncio/selector_events.py:879: ResourceWarning: unclosed transport <_SelectorSocketTransport fd=6>
+  _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/usr/lib/python3.12/asyncio/selector_events.py:879: ResourceWarning: unclosed transport <_SelectorSocketTransport fd=7>
+  _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
+
+"""

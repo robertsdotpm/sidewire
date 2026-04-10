@@ -43,6 +43,7 @@ Everything ended up under 700 lines of code which I think is pretty good!
 
 import hashlib
 import asyncio
+import time
 from aionetiface import *
 from .mqtt_defs import *
 from .utils import *
@@ -55,7 +56,7 @@ from .mqtt_connect import *
 from .mqtt_msgs import *
 
 class MQTTClient:
-    def __init__(self, af, nic, dest, kp):
+    def __init__(self, af, nic, dest, kp, get_time=time.time):
         # Addressing info for connected MQTT server.
         self.af = af
         self.nic = nic
@@ -99,6 +100,9 @@ class MQTTClient:
         # Background task for processing messages.
         self.dispatcher_task = None
 
+        # Used to get unix timestamp.
+        self.get_time = get_time
+
     # Receive back app protocol msgs unpacked.
     def add_msg_handler(self, msg_handler):
         self.msg_handlers.append(msg_handler)
@@ -113,13 +117,16 @@ class MQTTClient:
         # Re-entry guard.
         if self.dispatcher_task:
             return self.pipe
-        
+
+        # Store for use in timestamp validation on receive.
+        self.republish_duration = max(republish_duration, 2 * keep_alive)
+
         # Connect with a timeout.
         try:
             pipe = await asyncio.wait_for(mqtt_connect(self, keep_alive), timeout)
         except asyncio.TimeoutError:
             raise ConnectionError("MQTT connection timeout.")
-        
+
         # If it works start the background message dispatcher.
         if pipe and self.dispatcher_task is None:
             """

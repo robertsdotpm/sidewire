@@ -76,11 +76,12 @@ def reset_session_state(client):
 # Simple increasing packet ID with uniqueness checks.
 # Avoids zero which is an invalid packet ID.
 def get_packet_id(client):
-    while True:
+    for _ in range(65535):
         client.packet_id = (client.packet_id % 65535) + 1
-        assert(client.packet_id)
-        if client.packet_id not in client.packet_ids:
-            return struct.pack(">H", client.packet_id)
+        pid = struct.pack(">H", client.packet_id)
+        if not any(pid in client.packet_ids[pt] for pt in client.packet_ids):
+            return pid
+    raise RuntimeError("All 65535 MQTT packet IDs are in-flight")
         
 # Mostly used to test ping resps are received.
 async def blank_ping_handler(self):

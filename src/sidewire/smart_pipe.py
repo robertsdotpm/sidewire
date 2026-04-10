@@ -1,10 +1,3 @@
-"""
-Note: we can do the first complete optimization here but not going to
-bother with optimization while prototyping.
-May not even use setting my own queue_ids as ordering can be done
-by asyncio itself.
-"""
-
 from .utils import *
 import asyncio
 

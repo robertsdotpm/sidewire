@@ -29,6 +29,7 @@ If a server is down, maybe have a flag that disables it from reconnect retry in 
 code otherwise it blocks the whole program for servers it already knows are down.
 """
 
+import time
 from aionetiface import *
 from .mqtt import *
 from .signing import *
@@ -36,10 +37,11 @@ from .smart_pipe import *
 from .utils import *
 
 class Router:
-    def __init__(self, nic, kp, servers):
+    def __init__(self, nic, kp, servers, get_time=time.time):
         self.nic = nic
         self.kp = kp
         self.servers = servers
+        self.get_time = get_time
 
         # Build list of MQTT clients from server list.
         self.clients = {IP4: {}, IP6: {}}
@@ -47,10 +49,11 @@ class Router:
         for af in (IP4, IP6):
             for host in self.servers[af]:
                 self.clients[af][host] = MQTTClient(
-                    af, 
+                    af,
                     self.nic,
                     (host, self.servers[af][host]["port"]),
-                    self.kp
+                    self.kp,
+                    get_time=get_time
                 )
 
                 # Make all clients share the same recv_msg_ids queue.
@@ -77,7 +80,7 @@ class Router:
     
     # Smart pipe intelligently routes over a set of MQTT clients.
     async def pipe(self, dest_pub_hex, msg_cb=None, use_cache=False, expiry=3600):
-        now = asyncio.get_event_loop().time()
+        now = self.get_time()
         cached_clients = None
 
         # Attempt to retrieve from cache
@@ -99,7 +102,7 @@ class Router:
         return smart_pipe
     
     def cache_clients(self, pub_key_hex, clients):
-        now = asyncio.get_event_loop().time()
+        now = self.get_time()
         self.cache[pub_key_hex] = {
             "updated": now,
             "clients": clients

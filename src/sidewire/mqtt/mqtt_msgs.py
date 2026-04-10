@@ -1,5 +1,4 @@
 import struct
-import time
 from aionetiface import *
 from .mqtt_defs import *
 from .utils import *
@@ -38,8 +37,8 @@ def build_publish(topic, payload, packet_id, dup=False):
     pkt = bytes([header]) + mqtt_encode_varint(len(pl)) + pl
     return pkt
 
-def build_ping(last_ping, keep_alive):
-    now = asyncio.get_event_loop().time()
+def build_ping(last_ping, keep_alive, get_time):
+    now = get_time()
     if now - last_ping >= keep_alive:
         req = MQTTPacket(MQTTEnum.PINGREQ)
         buf = req.build()

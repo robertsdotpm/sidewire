@@ -85,7 +85,7 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
         "updated": 0,
 
         # Created now.
-        "created": asyncio.get_event_loop().time(),
+        "created": client.get_time(),
 
         #Track rebroadcast count.
         "amount": 0,

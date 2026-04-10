@@ -76,7 +76,7 @@ async def ensure_clients_connected(clients, timeout=3, retry_duration=1200):
             return True
         
         # Rate limiting: Check if we are allowed to retry yet
-        now = asyncio.get_event_loop().time()
+        now = client.get_time()
         if client.last_connect is not None:
             if (now - client.last_connect) < retry_duration:
                 return False

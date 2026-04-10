@@ -2,12 +2,13 @@ from ecdsa import VerifyingKey, SECP256k1, util
 from aionetiface import *
 
 class AppPacket:
-    def __init__(self, src_pk_hex=None, sig_hex=None, queue_id_hex=None, 
-            seq_no=None, msg_type=None, msg=None):
+    def __init__(self, src_pk_hex=None, sig_hex=None, queue_id_hex=None,
+            seq_no=None, timestamp=None, msg_type=None, msg=None):
         self.src_pk_hex = src_pk_hex
         self.sig_hex = sig_hex
         self.queue_id_hex = queue_id_hex
         self.seq_no = seq_no
+        self.timestamp = timestamp
         self.msg_type = msg_type
         self.msg = msg
 
@@ -16,10 +17,14 @@ class AppPacket:
         """Formats the integer sequence number into an 8-char hex string."""
         if self.seq_no is None:
             return None
-        
-        # Explicit format for Python 3.5+ compatibility
-        hex_string = "{:08x}".format(self.seq_no)
-        return hex_string
+        return "{:08x}".format(self.seq_no)
+
+    @property
+    def timestamp_hex(self):
+        """Formats the unix timestamp into a 16-char hex string."""
+        if self.timestamp is None:
+            return None
+        return "{:016x}".format(self.timestamp)
 
     def pack(self, client):
         """
@@ -28,23 +33,28 @@ class AppPacket:
         """
         # Validate inputs
         assert(len(self.queue_id_hex) == 64)
-        
+
+        # Stamp creation time once; retransmissions reuse the same packed bytes
+        # so the timestamp is always the original send time.
+        if self.timestamp is None:
+            self.timestamp = int(client.get_time())
+
         # Prepend application-level header to message portion.
         # msg_type is converted to hex (2 chars)
         type_as_bytes = bytes([self.msg_type])
         type_hex = to_h(type_as_bytes)
         headered_msg = type_hex + self.msg
 
-        # Signed message section.
-        signed_msg = self.queue_id_hex + self.seq_no_hex + headered_msg
-        
+        # Signed message section: queue_id(64) + seq(8) + timestamp(16) + type+msg
+        signed_msg = self.queue_id_hex + self.seq_no_hex + self.timestamp_hex + headered_msg
+
         # Sign the binary representation of the hex string
         signed_msg_bytes = to_b(signed_msg)
         sig = client.kp.private_key.sign(
             signed_msg_bytes,
             sigencode=util.sigencode_string
         )
-        
+
         self.sig_hex = to_h(sig)
         assert(len(self.sig_hex) == 128)
 
@@ -56,9 +66,9 @@ class AppPacket:
         # Full proto message to send.
         out = self.src_pk_hex + self.sig_hex + signed_msg
         assert(isinstance(out, str))
-        
-        # Validation: src_pk(66) + sig(128) + pipe(64) + seq(8) = 266
-        header_overhead = 266
+
+        # Validation: src_pk(66) + sig(128) + queue_id(64) + seq(8) + timestamp(16) = 282
+        header_overhead = 282
         expected_len = header_overhead + len(headered_msg)
         assert(len(out) == expected_len)
         return out
@@ -92,24 +102,27 @@ class AppPacket:
             return None
 
         # Route to Application Logic
-        # msg_data Layout: [queue_id(64)][seq(8)][type(2)][msg...]
+        # msg_data Layout: [queue_id(64)][seq(8)][timestamp(16)][type(2)][msg...]
         queue_id_hex = signed_msg_hex[:64]
         seq_no_hex = signed_msg_hex[64:72]
-        app_payload = signed_msg_hex[72:]
-        
+        timestamp_hex = signed_msg_hex[72:88]
+        app_payload = signed_msg_hex[88:]
+
         # Extract message type and actual content
         msg_type_hex = app_payload[:2]
         msg_type_bytes = h_to_b(msg_type_hex)
         msg_type = msg_type_bytes[0]
         actual_msg = app_payload[2:]
 
-        # Convert hex sequence back to integer
+        # Convert hex fields back to integers
         seq_no_int = int(seq_no_hex, 16)
+        timestamp_int = int(timestamp_hex, 16)
         return cls(
             src_pk_hex=src_pk_hex,
             sig_hex=sig_hex,
             queue_id_hex=queue_id_hex,
             seq_no=seq_no_int,
+            timestamp=timestamp_int,
             msg_type=msg_type,
             msg=actual_msg
         )
