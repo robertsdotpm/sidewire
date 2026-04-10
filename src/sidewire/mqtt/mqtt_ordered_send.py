@@ -40,7 +40,7 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
             er += sent_msg_id
             log(er)
         else:
-            client.sent_msg_ids[sent_msg_id] = 1
+            client.sent_msg_ids[sent_msg_id] = client.get_time()
 
     # Create queue per pipe ID.
     if queue_id_hex not in client.msg_queues[msg_type]:

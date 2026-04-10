@@ -96,9 +96,10 @@ async def handle_publish(client, packet):
     if app_packet is None:
         return
 
-    # Reject messages older than 2x republish_duration to prevent replay attacks.
+    # Reject messages older than 2x republish_duration for replay attacks.
     max_age = 2 * getattr(client, 'republish_duration', 60)
-    if int(client.get_time()) - app_packet.timestamp > max_age:
+    elapsed = int(client.get_time()) - app_packet.timestamp
+    if elapsed > max_age:
         return
 
     # Route to Application Logic

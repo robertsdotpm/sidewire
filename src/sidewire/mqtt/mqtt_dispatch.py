@@ -44,6 +44,7 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
             last_ping, ping_buf = build_ping(last_ping, keep_alive, client.get_time)
             if ping_buf: 
                 await client.pipe.send(ping_buf)
+                prune_msg_ids(client, now)
     except asyncio.CancelledError:
         #print("dispatcher exited.")
         pass

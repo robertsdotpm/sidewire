@@ -86,3 +86,10 @@ def get_packet_id(client):
 # Mostly used to test ping resps are received.
 async def blank_ping_handler(self):
     pass
+
+def prune_msg_ids(client, now):
+    ttl = client.republish_duration * 2
+    for id_table in (client.recv_msg_ids, client.sent_msg_ids,):
+        for msg_id, created_time in list(id_table.items()):
+            if (now - created_time) > ttl:
+                del id_table[msg_id]

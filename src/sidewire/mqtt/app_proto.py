@@ -53,7 +53,7 @@ async def process_app_msg(client, app_packet):
                 msg_handler(msg, src_pk, queue_id, client)
             )
 
-        client.recv_msg_ids[msg_hash] = 1
+        client.recv_msg_ids[msg_hash] = client.get_time()
 
     # Send Application ACK back to sender
     try:
