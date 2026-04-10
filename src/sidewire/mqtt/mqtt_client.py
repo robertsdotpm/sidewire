@@ -75,6 +75,7 @@ class MQTTClient:
         self.msg_queues = {
             MsgEnum.MSG: {},
             MsgEnum.MSGACK: {},
+            MsgEnum.PROBE: {},
         }
 
         # Msg part unpacked from the full proto over publish.

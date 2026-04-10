@@ -67,6 +67,20 @@ async def process_app_msg(client, app_packet):
     except Exception:
         log_exception()
 
+# Function called for new application (type=probe) publishes.
+# ACKs the sender so discovery works, but never calls user handlers.
+async def process_app_probe(client, app_packet):
+    try:
+        client.queue_msg(
+            "ack",
+            app_packet.src_pk_hex,
+            app_packet.queue_id_hex,
+            MsgEnum.MSGACK,
+            seq_no=app_packet.seq_no
+        )
+    except Exception:
+        log_exception()
+
 # Function called for new application (type=msgack) publishes.
 def process_app_ack(client, app_packet):
     # Pull fields directly from the object
@@ -74,23 +88,22 @@ def process_app_ack(client, app_packet):
     seq_no = app_packet.seq_no
     src_pk = app_packet.src_pk_hex
 
-    # Check if we even have a queue for this pipe ID.
-    if queue_id not in client.msg_queues[MsgEnum.MSG]:
+    # ACKs can resolve futures in either MSG or PROBE queues.
+    for msg_type in (MsgEnum.MSG, MsgEnum.PROBE):
+        if queue_id not in client.msg_queues[msg_type]:
+            continue
+
+        msg_queue = client.msg_queues[msg_type][queue_id]
+        if seq_no not in msg_queue:
+            continue
+
+        # Security: Ensure the ACK came from the person we sent to.
+        msg_meta = msg_queue[seq_no]
+        if msg_meta["dest_pk_hex"] != src_pk:
+            continue
+
+        if msg_meta["app_ack"].done():
+            return
+
+        msg_meta["app_ack"].set_result(True)
         return
-    
-    # Check sequence exists.
-    msg_queue = client.msg_queues[MsgEnum.MSG][queue_id]
-    if seq_no not in msg_queue:
-        return
-        
-    # Security: Ensure the ACK came from the person we sent the MSG to
-    msg_meta = msg_queue[seq_no]
-    if msg_meta["dest_pk_hex"] != src_pk:
-        return
-    
-    # Avoid setting result on a future that is already finished
-    if msg_meta["app_ack"].done():
-        return
-    
-    # Mark the application-level future as successful
-    msg_meta["app_ack"].set_result(True)

@@ -99,20 +99,18 @@ async def find_dest_in_servers(clients, dest_pub_hex, timeout=3):
         # Skip not started.
         if client.dispatcher_task is None:
             return None
-        
-        # Queue any arbitrary unique message.
-        queue_id_hex, ack = client.queue_msg("hello", dest_pub_hex)
 
-        # Wait for an acknowledgement.
+        # Send a PROBE — receiver ACKs silently without firing user handlers.
+        probe_queue_id = to_h(rand_b(32))
+        _, ack = client.queue_msg("", dest_pub_hex, probe_queue_id, MsgEnum.PROBE)
+
         try:
             await asyncio.wait_for(ack, timeout)
             return client
         except asyncio.TimeoutError:
-            print("dest in servers timeout")
             return None
         finally:
-            # Remove hello from queue.
-            client.dequeue_msg(queue_id_hex)
+            client.dequeue_msg(probe_queue_id, msg_type=MsgEnum.PROBE)
     
     tasks = [worker(client) for client in clients]
     results = await asyncio.gather(*tasks)

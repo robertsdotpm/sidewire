@@ -105,12 +105,8 @@ async def handle_publish(client, packet):
     # Route to Application Logic
     # Note: We use the members from our app_packet instance now.
     if app_packet.msg_type == MsgEnum.MSG:
-        await process_app_msg(
-            client, 
-            app_packet
-        )
-    if app_packet.msg_type == MsgEnum.MSGACK:
-        process_app_ack(
-            client, 
-            app_packet
-        )
+        await process_app_msg(client, app_packet)
+    elif app_packet.msg_type == MsgEnum.MSGACK:
+        process_app_ack(client, app_packet)
+    elif app_packet.msg_type == MsgEnum.PROBE:
+        await process_app_probe(client, app_packet)

@@ -5,6 +5,7 @@ MQTT_KEEP_ALIVE = 10
 class MsgEnum(IntEnum):
     MSG = 1
     MSGACK = 2
+    PROBE = 3
 
 class MQTTEnum(IntEnum):
     CONNECT = 1

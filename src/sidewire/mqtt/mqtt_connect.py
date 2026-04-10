@@ -7,6 +7,7 @@ when done.
 
 import asyncio
 import hashlib
+import random
 from aionetiface import *
 from .mqtt_defs import *
 from .utils import *
@@ -92,16 +93,13 @@ async def subscribe_to_identity(self, pipe):
         
 # Ensure a connection exists before running dispatcher.
 async def reconnect_loop(client, keep_alive):
-    # connection_lost set.
+    attempts = 0
     while not client.is_closed.is_set():
-        # connection_lost set.
         if client.pipe and not client.pipe.on_close.is_set():
             return
 
-        #print("Got con lost event")
         # Close old handle.
         if client.pipe:
-            # Cleanup a past client -- close its message dispatcher.
             await client.pipe.close()
 
         # Reset the old session state.
@@ -114,9 +112,9 @@ async def reconnect_loop(client, keep_alive):
             if pipe:
                 return True
         except (asyncio.TimeoutError, ConnectionError, OSError):
-            # Server still down.
             pass
 
-        # Avoid immediately reconnecting to avoid DoS.
-        #print("In disconnect loop?")
-        await asyncio.sleep(60)
+        # Exponential backoff with jitter: 1s, 2s, 4s, ... capped at 60s.
+        cap = min(2 ** attempts, 60)
+        await asyncio.sleep(random.uniform(0, cap))
+        attempts += 1
