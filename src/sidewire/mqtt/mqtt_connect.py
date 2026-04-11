@@ -11,7 +11,6 @@ import random
 from aionetiface import *
 from .mqtt_defs import *
 from .utils import *
-from ..signing import *
 from .mqtt_packet import *
 from .mqtt_ordered_send import *
 from .mqtt_dispatch import *

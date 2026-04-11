@@ -32,16 +32,15 @@ code otherwise it blocks the whole program for servers it already knows are down
 import time
 from aionetiface import *
 from .mqtt import *
-from .signing import *
 from .smart_pipe import *
 from .utils import *
 
 class Router:
-    def __init__(self, nic, kp, servers, get_time=time.time):
-        self.nic = nic
+    def __init__(self, kp, get_time=time.time, nic=None, servers=None):
         self.kp = kp
-        self.servers = servers
+        self.servers = servers or get_mqtt_server_list()
         self.get_time = get_time
+        self.nic = nic or Interface("default")
 
         # Build list of MQTT clients from server list.
         self.clients = {IP4: {}, IP6: {}}

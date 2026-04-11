@@ -13,7 +13,6 @@ the MQTT protocol possible:
 from aionetiface import *
 from .mqtt_defs import *
 from .utils import *
-from ..signing import *
 from .mqtt_packet import *
 from .app_packet import *
 from .app_proto import *

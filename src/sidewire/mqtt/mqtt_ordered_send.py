@@ -23,7 +23,6 @@ import asyncio
 from aionetiface import *
 from .mqtt_defs import *
 from .utils import *
-from ..signing import *
 from .mqtt_packet import *
 from .mqtt_proto import *
 from .app_packet import *
