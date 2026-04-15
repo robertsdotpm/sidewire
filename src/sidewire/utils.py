@@ -3,6 +3,7 @@ import hashlib
 import math
 import copy
 import asyncio
+from .mqtt.mqtt_defs import MsgEnum
 
 def get_server_score(af, host, pub_key_hex):
     """
@@ -69,52 +70,30 @@ def rendezvous_hash(nic, pub_key_hex, servers):
     # Final interleaving to ensure protocol diversity.
     return interleave_buckets(af_buckets)
 
-async def ensure_clients_connected(clients, timeout=3, retry_duration=1200):
-    async def worker(client):
-        # Check if already connected
-        if client.dispatcher_task is not None:
-            return True
-        
-        # Rate limiting: Check if we are allowed to retry yet
+async def try_client(dest_pub_hex, client, connect_timeout=3, probe_timeout=3, retry_duration=1200):
+    # Connect if not already connected, with rate limiting.
+    if client.dispatcher_task is None:
         now = client.get_time()
         if client.last_connect is not None:
             if (now - client.last_connect) < retry_duration:
-                return False
-
-        # Attempt connection
+                return None
         try:
-            # Update timestamp HERE to mark the start of an actual attempt
-            client.last_connect = now 
-            await asyncio.wait_for(client.connect(), timeout)
-            return True
+            client.last_connect = now
+            await asyncio.wait_for(client.connect(), connect_timeout)
         except Exception:
             log_exception()
-            return False
-
-    tasks = [worker(client) for client in clients]
-    return await asyncio.gather(*tasks)
-
-async def find_dest_in_servers(clients, dest_pub_hex, timeout=3):
-    async def worker(client):
-        # Skip not started.
-        if client.dispatcher_task is None:
             return None
 
-        # Send a PROBE — receiver ACKs silently without firing user handlers.
-        probe_queue_id = to_h(rand_b(32))
-        _, ack = client.queue_msg("", dest_pub_hex, probe_queue_id, MsgEnum.PROBE)
-
-        try:
-            await asyncio.wait_for(ack, timeout)
-            return client
-        except asyncio.TimeoutError:
-            return None
-        finally:
-            client.dequeue_msg(probe_queue_id, msg_type=MsgEnum.PROBE)
-    
-    tasks = [worker(client) for client in clients]
-    results = await asyncio.gather(*tasks)
-    return strip_none(results)
+    # Probe to check if dest is on this server.
+    probe_queue_id = to_h(rand_b(32))
+    _, ack = client.queue_msg("", dest_pub_hex, probe_queue_id, MsgEnum.PROBE)
+    try:
+        await asyncio.wait_for(ack, probe_timeout)
+        return client
+    except asyncio.TimeoutError:
+        return None
+    finally:
+        client.dequeue_msg(probe_queue_id, msg_type=MsgEnum.PROBE)
 
 async def get_dest_clients(nic, dest_pub_hex, servers, clients_map, n=4, max_servers=20):
     candidate_clients = []
@@ -125,36 +104,25 @@ async def get_dest_clients(nic, dest_pub_hex, servers, clients_map, n=4, max_ser
         client = clients_map[af][host]
         candidate_clients.append(client)
 
-    # Build a list of clients that converge with dest_pub_hex.
+    # Process in batches of n * 2 to tolerate some servers being down without
+    # hammering the full list. Within each batch all clients run concurrently,
+    # and gather preserves order so we pick by rendezvous rank, not speed.
+    batch_size = n * 2
     found_clients = []
-    tried_servers = 0
-    while len(found_clients) < n and tried_servers < max_servers:
-        # Build next list of candidates from head of candidate_clients.
-        candidates = []
+    limit = min(len(candidate_clients), max_servers)
 
-        # Calculate batch size with respect to n, remaining, and max_servers.
-        batch_size = min(
-            n - len(found_clients),
-            len(candidate_clients),
-            max_servers - tried_servers
+    for i in range(0, limit, batch_size):
+        batch = candidate_clients[i:i + batch_size]
+        results = await asyncio.gather(
+            *[try_client(dest_pub_hex, c) for c in batch],
+            return_exceptions=True
         )
-        if not batch_size:
-            break
 
-        # Try the next list of servers to find dest at.
-        for _ in range(0, batch_size):
-            candidates.append(candidate_clients.pop(0))
-
-        # Update tried server count.
-        tried_servers += batch_size
-    
-        # Ensure clients are connected.
-        await ensure_clients_connected(candidates)
-
-        # Check to see if dest is on any of the candidate servers.
-        results = await find_dest_in_servers(candidates, dest_pub_hex)
-        if results:
-            found_clients += results
+        for client, result in zip(batch, results):
+            if result is client:
+                found_clients.append(client)
+                if len(found_clients) >= n:
+                    return found_clients
 
     return found_clients
 
