@@ -22,43 +22,39 @@ async def mqtt_send_msg_and_handle(msg_list, msg_handler, do_close=False, republ
     client = get_mqtt_client(server=server)
     client.add_msg_handler(msg_handler)
 
-    # Connect client to server.
-    await client.connect(republish_duration, interval, keep_alive, ignore_acked)
-    if do_close:
-        client.pipe.sock.close()
+    try:
+        # Connect client to server.
+        await client.connect(republish_duration, interval, keep_alive, ignore_acked)
+        if do_close:
+            client.pipe.sock.close()
 
-    # Send a message.
-    pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
-    for buf in msg_list:
-        out, got_ack = client.queue_msg(
-            buf,
-            to_hs(client.kp.compact_public_key), # To self,
-            pipe_id_hex
-        )
+        # Send a message.
+        pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
+        for buf in msg_list:
+            out, got_ack = client.queue_msg(
+                buf,
+                to_hs(client.kp.compact_public_key), # To self,
+                pipe_id_hex
+            )
 
-        #print(out, id(got_ack))
+            # Sleep timeout.
+            if min_sleep:
+                await asyncio.sleep(min_sleep)
 
-        # Sleep timeout.
-        if min_sleep:
-            await asyncio.sleep(min_sleep)
-
-        # Wait for recv msg.
-        if ack_await:
-            if ignore_timeout:
-                try:
+            # Wait for recv msg.
+            if ack_await:
+                if ignore_timeout:
+                    try:
+                        await asyncio.wait_for(got_ack, timeout)
+                    except asyncio.TimeoutError:
+                        pass
+                else:
                     await asyncio.wait_for(got_ack, timeout)
-                except asyncio.TimeoutError:
-                    #print("timeout error")
-                    pass
-            else:
-                await asyncio.wait_for(got_ack, timeout)
-                #print("wait for ack")
 
-        if not ack_await:
-            await asyncio.sleep(2 * len(msg_list))
-
-    # Cleanup.
-    await client.close()
+            if not ack_await:
+                await asyncio.sleep(2 * len(msg_list))
+    finally:
+        await client.close()
 
 
 class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
@@ -133,9 +129,11 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             got_ping.append(True)
 
         client.ping_handler = ping_handler
-        await client.connect(keep_alive=2)
-        await asyncio.sleep(6)
-        await client.close()
+        try:
+            await client.connect(keep_alive=2)
+            await asyncio.sleep(6)
+        finally:
+            await client.close()
         assert(len(got_ping))
 
     """
@@ -161,27 +159,28 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         # Bob handles received messages.
         bob_client.add_msg_handler(msg_handler)
 
-        # Connect clients.
-        keep_alive = 10
-        await alice_client.connect()
-        await bob_client.connect(reconnect_delay=2, keep_alive=keep_alive)
+        try:
+            # Connect clients.
+            keep_alive = 10
+            await alice_client.connect()
+            await bob_client.connect(reconnect_delay=2, keep_alive=keep_alive)
 
-        # Disconnect bob.
-        bob_client.pipe.sock.close()
+            # Disconnect bob.
+            bob_client.pipe.sock.close()
 
-        # Send message to bob.
-        pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
-        for buf in msg_list:
-            _, got_ack = alice_client.queue_msg(
-                buf,
-                bob_client.kp.public_key_hex,
-                pipe_id_hex
-            )
-            
-            await got_ack
+            # Send message to bob.
+            pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
+            for buf in msg_list:
+                _, got_ack = alice_client.queue_msg(
+                    buf,
+                    bob_client.kp.public_key_hex,
+                    pipe_id_hex
+                )
 
-        await alice_client.close()
-        await bob_client.close()
+                await got_ack
+        finally:
+            await alice_client.close()
+            await bob_client.close()
 
     async def test_seq_send_recv_ack_await(self):
         msg_list = ["this is first", "second", "third", "fourth"]

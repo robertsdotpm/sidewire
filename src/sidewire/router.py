@@ -129,16 +129,18 @@ async def workspace():
     servers = get_mqtt_server_list()
     kp = Signing.keypair()
     router = Router(nic, kp, servers)
-    out = await router.start()
-    print("our own clients", out)
+    try:
+        out = await router.start()
+        print("our own clients", out)
 
-    async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
-        print("got ", msg, " from ", src_pk_hex)
+        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+            print("got ", msg, " from ", src_pk_hex)
 
-    # Already seen this client so shouldn't need to msg for liveliness.
-    pipe = await router.pipe(router.kp.public_key_hex, msg_handler, use_cache=True)
-    await pipe.send("hello world")
-    await router.close()
+        # Already seen this client so shouldn't need to msg for liveliness.
+        pipe = await router.pipe(router.kp.public_key_hex, msg_handler, use_cache=True)
+        await pipe.send("hello world")
+    finally:
+        await router.close()
 
 """
 notes:

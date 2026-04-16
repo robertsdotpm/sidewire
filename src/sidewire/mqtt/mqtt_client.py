@@ -274,34 +274,38 @@ async def workspace():
     async def msg_handler(msg, src_pk_hex, queue_id_hex, client):
         print("msg handler got ", msg, " ", src_pk_hex, " ", queue_id_hex)
 
-    # Connect Alice client.
     alice_kp = Signing.keypair()
     alice_queue_id = hashlib.sha256(b"alice pipe").hexdigest()
     alice_client = MQTTClient(IP4, nic, ("ovh1.p2pd.net", 1883), alice_kp)
-    await alice_client.connect()
-    alice_client.pipe.sock.close()
 
-    # Connect Bob client.
     bob_kp = Signing.keypair()
     bob_queue_id = hashlib.sha256(b"bob plugin").hexdigest()
     bob_client = MQTTClient(IP4, nic, ("ovh1.p2pd.net", 1883), bob_kp)
     bob_client.add_msg_handler(msg_handler)
-    await bob_client.connect()
 
-    # Send a message from alice to bob.
-    _, bob_ack_msg = alice_client.queue_msg(
-        "hello bob -- with ordering and ack", 
-        # Destination channel is Bob's public key hex.
-        to_hs(bob_kp.compact_public_key),
-        alice_queue_id
-    )
-    
-    # Wait for alice to receive the message.
-    await bob_ack_msg
-    print("got ack from bob")
-    await asyncio.sleep(4)
-    await alice_client.close()
-    await bob_client.close()
+    try:
+        # Connect Alice client.
+        await alice_client.connect()
+        alice_client.pipe.sock.close()
+
+        # Connect Bob client.
+        await bob_client.connect()
+
+        # Send a message from alice to bob.
+        _, bob_ack_msg = alice_client.queue_msg(
+            "hello bob -- with ordering and ack",
+            # Destination channel is Bob's public key hex.
+            to_hs(bob_kp.compact_public_key),
+            alice_queue_id
+        )
+
+        # Wait for bob to receive the message.
+        await bob_ack_msg
+        print("got ack from bob")
+        await asyncio.sleep(4)
+    finally:
+        await alice_client.close()
+        await bob_client.close()
     return
 
 
