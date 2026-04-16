@@ -1,4 +1,5 @@
 from aionetiface import *
+from .mqtt_defs import *
 
 def mqtt_encode_varint(value):
     encoded = bytearray()
@@ -93,3 +94,14 @@ def prune_msg_ids(client, now):
         for msg_id, created_time in list(id_table.items()):
             if (now - created_time) > ttl:
                 del id_table[msg_id]
+
+def get_msg_from_queue(client, queue_id_hex, seq_no, queue_type=MsgEnum.MSGACK):
+    queue = client.msg_queues[queue_type]
+    if queue_id_hex not in queue:
+        return None
+    
+    sub_queue = queue[queue_id_hex]
+    if seq_no not in sub_queue:
+        return None
+    
+    return sub_queue[seq_no]

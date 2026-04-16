@@ -30,7 +30,7 @@ class SmartPipe:
         for client in self.clients:
             _, ack_msg = client.queue_msg(msg, self.dest_pub_hex, msg_id_hex)
             task = asyncio.create_task(
-                asyncio.wait_for(ack_msg, timeout)
+                asyncio.wait_for(asyncio.shield(ack_msg), timeout)
             )
             tasks.append(task)
 

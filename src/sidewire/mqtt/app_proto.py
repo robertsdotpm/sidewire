@@ -1,6 +1,7 @@
 import hashlib
 from aionetiface import *
 from .mqtt_defs import *
+from .utils import *
 
 # Function called for new application (type=msg) publishes.
 async def process_app_msg(client, app_packet):
@@ -70,6 +71,18 @@ async def process_app_msg(client, app_packet):
 # Function called for new application (type=probe) publishes.
 # ACKs the sender so discovery works, but never calls user handlers.
 async def process_app_probe(client, app_packet):
+    # Does message already exist.
+    found_msg = get_msg_from_queue(
+        client, 
+        app_packet.queue_id_hex,
+        app_packet.seq_no,
+    )
+
+    # Suppress already queued response assert errors.
+    if found_msg:
+        return
+        
+    # Otherwise schedule an ack for it.
     try:
         client.queue_msg(
             "ack",

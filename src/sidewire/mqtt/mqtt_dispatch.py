@@ -12,6 +12,12 @@ from .utils import *
 from .mqtt_msgs import *
 
 # Cleanup handled by mqtt_client.close.
+async def safe_pipe_send(client, buf):
+    if not client.pipe or client.pipe.on_close.is_set():
+        return False
+    await async_wrap_errors(client.pipe.send(buf))
+    return True
+
 async def dispatcher(client, republish_duration, interval, keep_alive, ignore_acked=False, reconnect_delay=0):
     republish_duration = max(republish_duration, 2 * keep_alive)
     last_ping = client.get_time()
@@ -28,6 +34,8 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
             # Process all messages in the queues.
             now = client.get_time()
             for meta in iter_all_messages(client.msg_queues):
+                if not client.pipe or client.pipe.on_close.is_set():
+                    break
                 await republish_meta(
                     client, 
                     meta, 
@@ -42,8 +50,8 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
 
             # Keep-alive heartbeat.
             last_ping, ping_buf = build_ping(last_ping, keep_alive, client.get_time)
-            if ping_buf: 
-                await client.pipe.send(ping_buf)
+            if ping_buf:
+                await safe_pipe_send(client, ping_buf)
                 prune_msg_ids(client, now)
     except asyncio.CancelledError:
         #print("dispatcher exited.")
@@ -95,6 +103,4 @@ async def republish_meta(client, meta, now, interval, republish_duration, ignore
     )
 
     # Broadcast new message.
-    await async_wrap_errors(
-        client.pipe.send(buf)
-    )
+    await safe_pipe_send(client, buf)

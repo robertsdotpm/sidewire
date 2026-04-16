@@ -36,7 +36,7 @@ from .smart_pipe import *
 from .utils import *
 
 class Router:
-    def __init__(self, kp, get_time=time.time, nic=None, servers=None):
+    def __init__(self, kp, msg_handler=None, get_time=time.time, nic=None, servers=None):
         self.kp = kp
         self.servers = servers or get_mqtt_server_list()
         self.get_time = get_time
@@ -54,6 +54,9 @@ class Router:
                     self.kp,
                     get_time=get_time
                 )
+
+                if msg_handler:
+                    self.clients[af][host].add_msg_handler(msg_handler)
 
                 # Make all clients share the same recv_msg_ids queue.
                 self.clients[af][host].recv_msg_ids = self.recv_msg_ids
@@ -78,7 +81,7 @@ class Router:
         return clients
     
     # Smart pipe intelligently routes over a set of MQTT clients.
-    async def pipe(self, dest_pub_hex, msg_cb=None, use_cache=False, expiry=3600):
+    async def pipe(self, dest_pub_hex, use_cache=False, expiry=3600):
         now = self.get_time()
         cached_clients = None
 
@@ -92,7 +95,7 @@ class Router:
         smart_pipe = SmartPipe(self, dest_pub_hex, clients=cached_clients)
         
         # Connect (this performs rendezvous discovery ONLY if clients is None)
-        await smart_pipe.connect(msg_cb)
+        await smart_pipe.connect()
 
         # Update cache if we performed a fresh discovery or need to refresh
         if use_cache and cached_clients is None:

@@ -62,8 +62,12 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
     # This replaces the manual hex concatenation and signing block.
     out = packet.pack(client)
 
-    # Otherwise we'll overwrite an existing meta section.
-    assert(seq_no not in client.msg_queues[msg_type][queue_id_hex])
+    # If already queued (e.g. duplicate delivery or concurrent MSG+PROBE for
+    # the same queue_id/seq_no), return the existing future rather than
+    # overwriting or asserting -- callers can safely await it either way.
+    if seq_no in client.msg_queues[msg_type][queue_id_hex]:
+        existing = client.msg_queues[msg_type][queue_id_hex][seq_no]
+        return (queue_id_hex, seq_no), existing["app_ack"]
 
     # Message is queued by application type, high level pipe id, then seq.
     app_ack = asyncio.Future()
