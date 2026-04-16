@@ -212,9 +212,14 @@ class MQTTClient:
         # Indicate closed to block other callers.
         self.is_closed.set()
 
-        # Cancel message dispatcher bg task.
+        # Cancel message dispatcher bg task and wait for it to exit cleanly
+        # so its CancelledError handler runs before we close the pipe.
         if self.dispatcher_task:
             self.dispatcher_task.cancel()
+            try:
+                await self.dispatcher_task
+            except asyncio.CancelledError:
+                pass
             self.dispatcher_task = None
 
         # Cleanly disconnect from the MQTT server.
