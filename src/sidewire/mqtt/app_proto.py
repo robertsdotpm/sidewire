@@ -48,13 +48,15 @@ async def process_app_msg(client, app_packet):
     # already been processed -- we raise an error in queue func too.
     msg_hash = hashlib.sha256(to_b(msg)).hexdigest()
     if msg_hash not in client.recv_msg_ids:
+        # Stamp before awaiting handlers so concurrent clients sharing
+        # recv_msg_ids don't slip past the check during an await yield.
+        client.recv_msg_ids[msg_hash] = client.get_time()
+
         # Trigger registered app handlers
         for msg_handler in client.msg_handlers:
             await async_wrap_errors(
                 msg_handler(msg, src_pk, queue_id, client)
             )
-
-        client.recv_msg_ids[msg_hash] = client.get_time()
 
     # Send Application ACK back to sender
     try:
