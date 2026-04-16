@@ -235,6 +235,14 @@ class MQTTClient:
             await self.pipe.close()
             self.pipe = None
 
+    async def __aenter__(self):
+        await self.connect()
+        return self
+
+    async def __aexit__(self, *_):
+        await self.close()
+        return False
+
     async def ping_handler(self):
         pass
 

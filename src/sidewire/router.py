@@ -116,6 +116,14 @@ class Router:
                 client = self.clients[af][host]
                 await client.close()
 
+    async def __aenter__(self):
+        await self.start()
+        return self
+
+    async def __aexit__(self, *_):
+        await self.close()
+        return False
+
 async def workspace():
     nic = Interface("default")
     servers = get_mqtt_server_list()

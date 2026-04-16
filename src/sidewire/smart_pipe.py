@@ -82,3 +82,11 @@ class SmartPipe:
     async def close(self):
         for client in self.clients:
             await client.close()
+
+    async def __aenter__(self):
+        await self.connect()
+        return self
+
+    async def __aexit__(self, *_):
+        await self.close()
+        return False
