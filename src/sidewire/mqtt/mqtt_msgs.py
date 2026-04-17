@@ -25,7 +25,6 @@ def build_subscribe(topic, packet_id):
     return pkt
 
 def build_publish(topic, payload, packet_id, dup=False):
-    packet_id = packet_id
     topic_bytes = mqtt_enc_str(topic)
     pl = topic_bytes + packet_id + to_b(payload)
 

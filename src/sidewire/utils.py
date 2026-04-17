@@ -19,17 +19,12 @@ def get_server_score(af, host, pub_key_hex):
     # Convert hex to an integer.
     int_hash = int.from_bytes(h, 'big')
 
-    """
-    Converts massive int 256 bit value into range from 1 to < 1
-    as a decimal. This is used for the next trick with log.
-    """
+    # Map the 256-bit integer to the range (0, 1].
     one_or_less = (int_hash + 1) / (2 ** 256)
 
-    """
-    When a number is less than one: math.log expands differences.
-    They all fit on the same line so large numbers don't adversely
-    effect clustering of final values. The field ends up being fair.
-    """
+    # Apply -log(U) to stretch differences between values that are very close
+    # to 1.  This gives a fair, exponentially-distributed score where no server
+    # gets an unfair advantage from hash clustering.
     even_playing_field = -math.log(one_or_less)
     
     return even_playing_field

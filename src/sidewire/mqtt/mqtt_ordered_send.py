@@ -48,10 +48,8 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
     # Ensure no collisions for new messages.
     if seq_no is None:
         seq_no = len(client.msg_queues[msg_type][queue_id_hex])
-    
-    #print("order send seq no =", seq_no)
 
-    # Use the new class to handle packing, signing, and header construction.
+    # Pack the message using AppPacket (handles signing and header construction).
     packet = AppPacket(
         queue_id_hex=queue_id_hex,
         seq_no=seq_no,
@@ -90,7 +88,7 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
         # Created now.
         "created": client.get_time(),
 
-        #Track rebroadcast count.
+        # Track rebroadcast count.
         "amount": 0,
     }
     

@@ -11,13 +11,11 @@ async def process_app_msg(client, app_packet):
     src_pk = app_packet.src_pk_hex
     msg = app_packet.msg
 
-    """
-    Since flow is: send 0, get ack 0, send 1 ...
-    When we receive the next message it means the other side received our ack
-    for a past message. Hence, we no longer need to keep sending those acks.
-    This code deletes any queued acks older than the current message sequence.
-    Note: only applies to sequenced messages in a queue.
-    """
+    # Flow is: send 0, get ack 0, send 1 ...
+    # When we receive the next message it means the other side received our ack
+    # for a past message. Hence, we no longer need to keep sending those acks.
+    # This code deletes any queued acks older than the current message sequence.
+    # Note: only applies to sequenced messages in a queue.
     msg_ack_queues = client.msg_queues[MsgEnum.MSGACK]
     if queue_id in msg_ack_queues:
         # List of sequenced app-level ack metas.

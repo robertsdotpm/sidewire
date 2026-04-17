@@ -29,9 +29,12 @@ async def mqtt_connect(self, keep_alive):
     Normally MQTT clients reuse IDs to get offline messages but here since
     the software manages message delivery itself a rand id ensures a fresh state.
     """
+    # In MQTT the client ID determines offline saved message queues.
+    # Normally MQTT clients reuse IDs to get offline messages but here since
+    # the software manages message delivery itself a rand id ensures a fresh state.
     self.client_id = self.client_id or rand_plain(15)
     route = self.nic.route(self.af)
-    
+
     # Establish TCP Connection
     pipe = await Pipe(TCP, (self.host, self.port), route).connect()
     if not pipe:
@@ -52,8 +55,6 @@ async def mqtt_connect(self, keep_alive):
     if connack != b' \x02\x00\x00':
         await pipe.close()
         raise ConnectionError("Invalid MQTT CONNACK: {}".format(connack))
-
-    #print("MQTT Connected: {}".format(self.client_id))
 
     # Message Processing Setup
     self.pipe = pipe

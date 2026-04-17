@@ -54,12 +54,9 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
                 await safe_pipe_send(client, ping_buf)
                 prune_msg_ids(client, now)
     except asyncio.CancelledError:
-        #print("dispatcher exited.")
         pass
     except Exception:
         log_exception()
-
-    #print("dispatcher exited cleanly.")
 
 async def republish_meta(client, meta, now, interval, republish_duration, ignore_acked):
     # Message has already been acked.
@@ -91,7 +88,6 @@ async def republish_meta(client, meta, now, interval, republish_duration, ignore
     if total_elapsed >= republish_duration:
         return
     
-    #print(interval_elapsed, " ", current_backoff, " ", jittered_interval, " ", meta["out"])
     # Increase state counters for THIS specific message.
     meta["updated"] = now
     meta["attempts"] = attempts + 1

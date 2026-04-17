@@ -97,8 +97,7 @@ class AppPacket:
                 sigdecode=util.sigdecode_string
             )
         except Exception:
-            # Common failure point if keys or signatures are malformed
-            #print("e: Signature verification failed")
+            # Common failure point if keys or signatures are malformed.
             return None
 
         # Route to Application Logic

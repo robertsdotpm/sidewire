@@ -142,11 +142,7 @@ async def workspace():
     finally:
         await router.close()
 
-"""
-notes:
-dangling resource in te mqtt ping test code.
-"""
-
+# TODO: dangling resource in the mqtt ping test code.
 
 if __name__ == "__main__":
     async_run(workspace())

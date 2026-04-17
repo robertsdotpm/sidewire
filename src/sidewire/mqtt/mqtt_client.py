@@ -127,13 +127,10 @@ class MQTTClient:
         except asyncio.TimeoutError:
             raise ConnectionError("MQTT connection timeout.")
 
-        # If it works start the background message dispatcher.
+        # Start the background dispatcher after connect() returns so that
+        # self.pipe is already set when the dispatcher's reconnect loop first runs,
+        # avoiding a race condition between the two.
         if pipe and self.dispatcher_task is None:
-            """
-            As dispatcher also sets self.pipe for reconnect -- there is a race
-            condition between connect() and reconnect loop. Starting dispatcher
-            after connect solves that issue.
-            """
             self.dispatcher_task = asyncio.create_task(
                 async_wrap_errors(
                     dispatcher(
@@ -246,31 +243,10 @@ class MQTTClient:
     async def ping_handler(self):
         pass
 
-# Example usage using -m
-async def workspace():
-    #m = MQTTClient(IP4, nic, node_id, ("test.mosquitto.org", 1883))
+async def demo_mqtt():
+    """Demo: connect two clients (Alice and Bob) and send a message."""
     nic = Interface("default")
 
-    #pipe = await Pipe(TCP, ("example.com", 8123), nic.route(IP4)).connect()
-    #print(pipe)
-    #return
-
-    """
-    pipe = await Pipe(TCP, ("example.com", 80), nic.route(IP4)).connect()
-    pipe.sock.shutdown(socket.SHUT_RDWR)
-    pipe.sock.close()   
-    print(pipe.sock)
-
-    ret = await pipe.send(b"test")
-    # 0 on con lost
-    print(ret)
-    return
-    """
-    
-    """
-    This will probably end up being a closure that has an embedded reference
-    back to the plugin manager.
-    """
     async def msg_handler(msg, src_pk_hex, queue_id_hex, client):
         print("msg handler got ", msg, " ", src_pk_hex, " ", queue_id_hex)
 
@@ -279,45 +255,25 @@ async def workspace():
     alice_client = MQTTClient(IP4, nic, ("ovh1.p2pd.net", 1883), alice_kp)
 
     bob_kp = Signing.keypair()
-    bob_queue_id = hashlib.sha256(b"bob plugin").hexdigest()
     bob_client = MQTTClient(IP4, nic, ("ovh1.p2pd.net", 1883), bob_kp)
     bob_client.add_msg_handler(msg_handler)
 
     try:
-        # Connect Alice client.
         await alice_client.connect()
-        alice_client.pipe.sock.close()
-
-        # Connect Bob client.
         await bob_client.connect()
 
-        # Send a message from alice to bob.
-        _, bob_ack_msg = alice_client.queue_msg(
+        _, bob_ack = alice_client.queue_msg(
             "hello bob -- with ordering and ack",
-            # Destination channel is Bob's public key hex.
             to_hs(bob_kp.compact_public_key),
             alice_queue_id
         )
 
-        # Wait for bob to receive the message.
-        await bob_ack_msg
+        await bob_ack
         print("got ack from bob")
         await asyncio.sleep(4)
     finally:
         await alice_client.close()
         await bob_client.close()
-    return
-
-
-    #await m.subscribe(node_id)
-
-    #await m.process_events()
-
-
-
-    await m.subscribe("test/min35")
-    await m.publish("test/min35", "hello from py3.5")
-    await asyncio.sleep(4)
 
 if __name__ == "__main__":
-    async_run(workspace())
+    async_run(demo_mqtt())

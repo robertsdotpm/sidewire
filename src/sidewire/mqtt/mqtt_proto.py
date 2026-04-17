@@ -32,13 +32,11 @@ async def handle_mqtt_packet(client, packet):
     elif packet.type == MQTTEnum.PINGRESP:
         await client.ping_handler()
 
-"""
-MQTT packets for publish, puback, subscribe, suback, have packet IDs.
-The software has a table of packet IDs that point to a future.
-The future is resolved for acks back from server. Currently, since
-the software uses app-level ACKS no packet-level awaits are used for
-these futures but acking here does mean the packet ID should be freed.
-"""
+# MQTT packets for publish, puback, subscribe, suback, have packet IDs.
+# The software has a table of packet IDs that point to a future.
+# The future is resolved for acks back from server. Currently, since
+# the software uses app-level ACKS no packet-level awaits are used for
+# these futures but acking here does mean the packet ID should be freed.
 async def handle_broker_ack(client, packet):
     # Extract packet ID from packet.
     packet_id = packet.body[:2]
@@ -57,19 +55,14 @@ async def handle_broker_ack(client, packet):
     else:
         ack_future.set_result(True)
 
-    """
-    I think it should be fine to delete the packet ID reference now.
-    Any futures being awaited will have a reference from the caller
-    so they won't just be garbage collected. This prevents all the
-    packet IDs from being filled up and used.
-    """
+    # Delete the packet ID reference now. Futures being awaited will have a
+    # reference from the caller so they won't be garbage collected. This
+    # prevents packet IDs from being exhausted over time.
     del client.packet_ids[packet.type][packet_id]
 
-"""
-Handles receiving a new message for our ECDSA pub hex topic sub.
-Messages fall into either acks for a past message or new messages.
-The software validates signatures and sets futures for acks.
-"""
+# Handles receiving a new message for our ECDSA pub hex topic sub.
+# Messages fall into either acks for a past message or new messages.
+# The software validates signatures and sets futures for acks.
 async def handle_publish(client, packet):
     # Publish-specific function for parsing a packet.
     parsed = mqtt_parse_publish(packet)
@@ -86,11 +79,9 @@ async def handle_publish(client, packet):
     # Key Check: Is this message meant for us?
     # Comparing binary to binary for safety.
     if h_to_b(topic) != client.kp.compact_public_key:
-        #print("e: Recv msg not meant for us.")
         return
 
-    # Use the class to verify signature and extract fields.
-    # This replaces the manual slicing and VerifyingKey logic.
+    # Verify signature and extract fields.
     app_packet = AppPacket.unpack(payload)
     if app_packet is None:
         return
@@ -101,8 +92,7 @@ async def handle_publish(client, packet):
     if elapsed > max_age:
         return
 
-    # Route to Application Logic
-    # Note: We use the members from our app_packet instance now.
+    # Route to application logic based on message type.
     if app_packet.msg_type == MsgEnum.MSG:
         await process_app_msg(client, app_packet)
     elif app_packet.msg_type == MsgEnum.MSGACK:

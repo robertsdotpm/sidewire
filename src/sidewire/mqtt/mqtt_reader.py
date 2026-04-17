@@ -8,7 +8,6 @@ from .mqtt_proto import *
 async def mqtt_packet_reader(client, chunk, client_tup, pipe):
     # Nothing received, end.
     if not chunk:
-        #print("not chunk")
         return
 
     # Append incoming data to buffer.
@@ -18,13 +17,11 @@ async def mqtt_packet_reader(client, chunk, client_tup, pipe):
     while client.buf:
         # Need at least fixed header + 1 byte of remaining length.
         if len(client.buf) < 2:
-            #print("need at least fixed header", client.buf)
             return
 
         # Decode remaining length (starts at byte 1).
         rem_len, consumed = mqtt_decode_varint(client.buf, 1)
         if rem_len is None:
-            #print("rem len is none", client.buf)
             return
 
         # Total packet size = fixed header (1) + varint + payload.
@@ -32,14 +29,11 @@ async def mqtt_packet_reader(client, chunk, client_tup, pipe):
 
         # Wait for full packet.
         if len(client.buf) < total_len:
-            #print("wait for full packet", client.buf)
             return
 
         # Extract full packet.
         pkt_buf = client.buf[:total_len]
         client.buf = client.buf[total_len:]
-
-        #print("pkt buf = ", pkt_buf)
 
         # Parse + handle.
         pkt = mqtt_parse_packet(pkt_buf)
