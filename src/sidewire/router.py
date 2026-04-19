@@ -66,7 +66,12 @@ class Router:
 
         # Pub key hex -> {"updated", "clients"}
         self.cache = {}
-            
+
+    def add_msg_handler(self, msg_handler):
+        for af in self.clients:
+            for host in self.clients[af]:
+                self.clients[af][host].add_msg_handler(msg_handler)
+
     # Same function reusable by both sides.
     async def start(self):
         clients = await get_dest_clients(
