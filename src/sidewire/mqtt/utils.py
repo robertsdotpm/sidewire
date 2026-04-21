@@ -1,3 +1,5 @@
+import struct
+import asyncio
 from aionetiface import *
 from .mqtt_defs import *
 

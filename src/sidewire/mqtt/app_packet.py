@@ -31,8 +31,8 @@ class AppPacket:
         Equivalent to the packing logic in ordered_ack_send.
         Constructs the full hex string to be sent over the wire.
         """
-        # Validate inputs
-        assert(len(self.queue_id_hex) == 64)
+        if len(self.queue_id_hex) != 64:
+            raise ValueError(f"queue_id_hex must be 64 hex chars, got {len(self.queue_id_hex)}")
 
         # Stamp creation time once; retransmissions reuse the same packed bytes
         # so the timestamp is always the original send time.
@@ -56,21 +56,12 @@ class AppPacket:
         )
 
         self.sig_hex = to_h(sig)
-        assert(len(self.sig_hex) == 128)
-
-        # Our public key (66 chars)
         compact_pk = client.kp.compact_public_key
         self.src_pk_hex = to_h(compact_pk)
-        assert(len(self.src_pk_hex) == 66)
 
         # Full proto message to send.
+        # Layout: src_pk(66) + sig(128) + queue_id(64) + seq(8) + timestamp(16) + headered_msg
         out = self.src_pk_hex + self.sig_hex + signed_msg
-        assert(isinstance(out, str))
-
-        # Validation: src_pk(66) + sig(128) + queue_id(64) + seq(8) + timestamp(16) = 282
-        header_overhead = 282
-        expected_len = header_overhead + len(headered_msg)
-        assert(len(out) == expected_len)
         return out
 
     @classmethod

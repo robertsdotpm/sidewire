@@ -28,8 +28,10 @@ from .mqtt_proto import *
 from .app_packet import *
 
 def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
-    assert(len(queue_id_hex) == 64)
-    assert(len(dest_pk_hex) == 66)
+    if len(queue_id_hex) != 64:
+        raise ValueError(f"queue_id_hex must be 64 hex chars, got {len(queue_id_hex)}")
+    if len(dest_pk_hex) != 66:
+        raise ValueError(f"dest_pk_hex must be 66 hex chars, got {len(dest_pk_hex)}")
 
     # Duplicate messages may be a bug by the caller.
     if msg_type == MsgEnum.MSG:

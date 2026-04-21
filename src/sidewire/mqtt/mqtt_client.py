@@ -149,7 +149,8 @@ class MQTTClient:
     # Internal: used to subscribe to own pub key hex.
     # Returns packet and future to await ack for the packet from the server.
     def subscribe(self, topic):
-        assert(type(topic) == str)
+        if not isinstance(topic, str):
+            raise TypeError(f"topic must be str, got {type(topic).__name__}")
         packet_id, packet_ack = packet_ack_future(self, MQTTEnum.SUBACK)
         buf = build_subscribe(topic, packet_id)
         return buf, packet_ack
@@ -194,8 +195,10 @@ class MQTTClient:
     # Internal: used to publish signed messages to pub key hashed topics.
     # Returns packet and future to await ack for the packet from the server.
     def publish(self, topic, payload, dup=False):
-        assert(is_ascii(topic))
-        assert(is_ascii(payload))
+        if not is_ascii(topic):
+            raise ValueError("topic must be ASCII")
+        if not is_ascii(payload):
+            raise ValueError("payload must be ASCII")
         packet_id, packet_ack = packet_ack_future(self, MQTTEnum.PUBACK)
         buf = build_publish(topic, payload, packet_id, dup)
         return buf, packet_ack
