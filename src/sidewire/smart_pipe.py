@@ -56,11 +56,9 @@ class SmartPipe:
                         return len(msg)
 
                     except asyncio.TimeoutError:
-                        # Ignore and continue
                         pass
-                    except Exception:
-                        # Ignore but could log here
-                        pass
+                    except (OSError, ConnectionError):
+                        log_exception()
 
                 # Continue only with remaining tasks
                 tasks = list(pending)

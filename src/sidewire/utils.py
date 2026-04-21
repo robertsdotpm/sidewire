@@ -52,7 +52,7 @@ async def try_client(dest_pub_hex, client, connect_timeout=3, probe_timeout=3, r
         try:
             client.last_connect = now
             await asyncio.wait_for(client.connect(), connect_timeout)
-        except Exception:
+        except (OSError, ConnectionError, asyncio.TimeoutError):
             log_exception()
             return None
 

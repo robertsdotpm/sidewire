@@ -55,7 +55,7 @@ async def dispatcher(client, republish_duration, interval, keep_alive, ignore_ac
                 prune_msg_ids(client, now)
     except asyncio.CancelledError:
         pass
-    except Exception:
+    except (OSError, ConnectionError, asyncio.TimeoutError):
         log_exception()
 
 async def republish_meta(client, meta, now, interval, republish_duration, ignore_acked):

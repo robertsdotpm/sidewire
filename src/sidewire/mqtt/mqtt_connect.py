@@ -6,7 +6,6 @@ when done.
 """
 
 import asyncio
-import hashlib
 import random
 from aionetiface import *
 from .mqtt_defs import *

@@ -1,4 +1,4 @@
-from ecdsa import VerifyingKey, SECP256k1, util
+from ecdsa import VerifyingKey, SECP256k1, util, BadSignatureError, MalformedPointError
 from aionetiface import *
 
 class AppPacket:
@@ -87,7 +87,7 @@ class AppPacket:
                 signed_msg_bytes, 
                 sigdecode=util.sigdecode_string
             )
-        except Exception:
+        except (BadSignatureError, MalformedPointError, ValueError):
             # Common failure point if keys or signatures are malformed.
             return None
 

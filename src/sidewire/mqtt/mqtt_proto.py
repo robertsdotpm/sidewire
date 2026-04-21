@@ -67,7 +67,6 @@ async def handle_publish(client, packet):
     # Publish-specific function for parsing a packet.
     parsed = mqtt_parse_publish(packet)
     if not parsed:
-        #print("e: invalid publish packet")
         return
 
     # Immediate MQTT Ack to keep the broker's in-flight window open

@@ -9,7 +9,7 @@ exclude = ["experiments*"]
 [project]
 name = "sidewire"
 version = "0.1.1"
-description = "Short description of your project"
+description = "Lightweight MQTT-based secure P2P messaging layer"
 readme = "README.md"
 requires-python = ">=3.5"
 authors = [
@@ -22,5 +22,6 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "aionetiface"
+    "aionetiface",
+    "ecdsa"
 ]

@@ -65,7 +65,7 @@ async def process_app_msg(client, app_packet):
             MsgEnum.MSGACK,
             seq_no=seq_no
         )
-    except Exception:
+    except (ValueError, KeyError):
         log_exception()
 
 # Function called for new application (type=probe) publishes.
@@ -91,7 +91,7 @@ async def process_app_probe(client, app_packet):
             MsgEnum.MSGACK,
             seq_no=app_packet.seq_no
         )
-    except Exception:
+    except (ValueError, KeyError):
         log_exception()
 
 # Function called for new application (type=msgack) publishes.
