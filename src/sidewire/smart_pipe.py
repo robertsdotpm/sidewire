@@ -1,19 +1,28 @@
-from .utils import *
+from aionetiface import log_exception, rand_b, to_h
+from .utils import get_dest_clients
 import asyncio
+from typing import Any, Callable, List, Optional
+
 
 class SmartPipe:
-    def __init__(self, router, dest_pub_hex, clients=None):
+    """Route messages to a destination over the best available MQTT clients."""
+
+    def __init__(
+        self, router: Any, dest_pub_hex: str, clients: Optional[List[Any]] = None
+    ) -> None:
+        """Initialize a SmartPipe with a router, destination public key, and optional pre-resolved clients."""
         self.router = router
         self.dest_pub_hex = dest_pub_hex
-        self.clients = clients or []
+        self.clients = clients or []  # type: List[Any]
 
-    async def connect(self, msg_cb=None):
+    async def connect(self, msg_cb: Optional[Callable] = None) -> "SmartPipe":
+        """Discover destination clients via rendezvous hash if not already resolved."""
         if not len(self.clients):
             self.clients = await get_dest_clients(
                 self.router.nic,
                 self.dest_pub_hex,
                 self.router.servers,
-                self.router.clients
+                self.router.clients,
             )
 
         if msg_cb:
@@ -22,7 +31,8 @@ class SmartPipe:
 
         return self
 
-    async def send(self, msg, timeout=4):
+    async def send(self, msg: str, timeout: int = 4) -> int:
+        """Send a message to the destination, returning the byte length on success or 0 on failure."""
         msg_id_hex = to_h(rand_b(32))
 
         # Create all tasks upfront
@@ -37,8 +47,7 @@ class SmartPipe:
         try:
             while tasks:
                 done, pending = await asyncio.wait(
-                    tasks,
-                    return_when=asyncio.FIRST_COMPLETED
+                    tasks, return_when=asyncio.FIRST_COMPLETED
                 )
 
                 for task in done:
@@ -76,15 +85,18 @@ class SmartPipe:
                 client.dequeue_msg(msg_id_hex)
 
         return 0
-    
-    async def close(self):
+
+    async def close(self) -> None:
+        """Close all underlying MQTT client connections."""
         for client in self.clients:
             await client.close()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "SmartPipe":
+        """Connect on context manager entry."""
         await self.connect()
         return self
 
-    async def __aexit__(self, *_):
+    async def __aexit__(self, *_: Any) -> bool:
+        """Close on context manager exit."""
         await self.close()
         return False

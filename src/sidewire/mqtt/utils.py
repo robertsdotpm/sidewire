@@ -1,9 +1,11 @@
 import struct
 import asyncio
-from aionetiface import *
-from .mqtt_defs import *
+from typing import Optional, Tuple, Any, Dict, Iterator
+from aionetiface import to_b
+from .mqtt_defs import MsgEnum
 
-def mqtt_encode_varint(value):
+
+def mqtt_encode_varint(value: int) -> bytes:
     encoded = bytearray()
     while True:
         byte = value % 128
@@ -13,10 +15,11 @@ def mqtt_encode_varint(value):
         encoded.append(byte)
         if value == 0:
             break
-        
+
     return bytes(encoded)
 
-def mqtt_decode_varint(buf, offset):
+
+def mqtt_decode_varint(buf: bytes, offset: int) -> Tuple[Optional[int], Optional[int]]:
     multiplier = 1
     value = 0
     consumed = 0
@@ -35,18 +38,23 @@ def mqtt_decode_varint(buf, offset):
 
     raise ValueError("Malformed Remaining Length")
 
-def mqtt_enc_str(s):
+
+def mqtt_enc_str(s: Any) -> bytes:
     b = to_b(s)
     return struct.pack("!H", len(b)) + b
 
-def packet_ack_future(client, packet_type):
+
+def packet_ack_future(client: Any, packet_type: Any) -> Tuple[bytes, asyncio.Future]:
     packet_id = get_packet_id(client)
     packet_ack = asyncio.Future()
     client.packet_ids[packet_type][packet_id] = packet_ack
     return packet_id, packet_ack
 
+
 # No three-level nesting for all messages.
-def iter_all_messages(msg_queues):
+
+
+def iter_all_messages(msg_queues: Dict) -> Iterator[Dict]:
     # Queues are split by app msg type: MSG or MSGACK.
     for msg_type in msg_queues:
         # Each plugin instance has a unique queue_id.
@@ -56,8 +64,11 @@ def iter_all_messages(msg_queues):
             for seq_no in sorted(queue.keys()):
                 yield queue[seq_no]
 
+
 # Resets protocol-level state for a fresh connection.
-def reset_session_state(client):
+
+
+def reset_session_state(client: Any) -> None:
     # Clear the stream buffer
     client.buf = b""
 
@@ -66,9 +77,7 @@ def reset_session_state(client):
         for seq_no in client.packet_ids[packet_type]:
             future = client.packet_ids[packet_type][seq_no]
             if not future.done():
-                future.set_exception(
-                    ConnectionError("Connection lost for packet ACK")
-                )
+                future.set_exception(ConnectionError("Connection lost for packet ACK"))
 
         # Fresh list of type id futures.
         client.packet_ids[packet_type] = {}
@@ -76,34 +85,47 @@ def reset_session_state(client):
     # Reset packet ID counter for the new pipe
     client.packet_id = 0
 
+
 # Simple increasing packet ID with uniqueness checks.
 # Avoids zero which is an invalid packet ID.
-def get_packet_id(client):
+
+
+def get_packet_id(client: Any) -> bytes:
     for _ in range(65535):
         client.packet_id = (client.packet_id % 65535) + 1
         pid = struct.pack(">H", client.packet_id)
         if not any(pid in client.packet_ids[pt] for pt in client.packet_ids):
             return pid
     raise RuntimeError("All 65535 MQTT packet IDs are in-flight")
-        
+
+
 # Mostly used to test ping resps are received.
-async def blank_ping_handler(self):
+
+
+async def blank_ping_handler(self: Any) -> None:
     pass
 
-def prune_msg_ids(client, now):
+
+def prune_msg_ids(client: Any, now: float) -> None:
     ttl = client.republish_duration * 2
-    for id_table in (client.recv_msg_ids, client.sent_msg_ids,):
+    for id_table in (
+        client.recv_msg_ids,
+        client.sent_msg_ids,
+    ):
         for msg_id, created_time in list(id_table.items()):
             if (now - created_time) > ttl:
                 del id_table[msg_id]
 
-def get_msg_from_queue(client, queue_id_hex, seq_no, queue_type=MsgEnum.MSGACK):
+
+def get_msg_from_queue(
+    client: Any, queue_id_hex: str, seq_no: int, queue_type: Any = MsgEnum.MSGACK
+) -> Optional[Dict]:
     queue = client.msg_queues[queue_type]
     if queue_id_hex not in queue:
         return None
-    
+
     sub_queue = queue[queue_id_hex]
     if seq_no not in sub_queue:
         return None
-    
+
     return sub_queue[seq_no]

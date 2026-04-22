@@ -16,7 +16,7 @@ can stream this sorted list to a connect process to easily converge on connected
 clients regardless of what address families a NIC supports. Convergence is still
 possible if at least one address families is shared.
 
-The sorting algorithm uses SHA256 to produce uniformly distributed values, 
+The sorting algorithm uses SHA256 to produce uniformly distributed values,
 but using -log(U)  transforms them into an exponential distribution. This allows
 fair and mathematically correct weighted selection, where servers with higher
 weights are more likely to appear earlier in the ordering. The benefit is not just
@@ -30,13 +30,25 @@ code otherwise it blocks the whole program for servers it already knows are down
 """
 
 import time
-from aionetiface import *
-from .mqtt import *
-from .smart_pipe import *
-from .utils import *
+from typing import Any, Callable, Dict, List, Optional
+from aionetiface import IP4, IP6, Interface, Signing, async_run
+from .mqtt import MQTTClient
+from .smart_pipe import SmartPipe
+from .utils import get_dest_clients, get_mqtt_server_list
+
 
 class Router:
-    def __init__(self, kp, msg_handler=None, get_time=time.time, nic=None, servers=None):
+    """Coordinate multiple MQTTClient instances to route messages using rendezvous hashing."""
+
+    def __init__(
+        self,
+        kp: Any,
+        msg_handler: Optional[Callable] = None,
+        get_time: Callable[[], float] = time.time,
+        nic: Any = None,
+        servers: Optional[Dict] = None,
+    ) -> None:
+        """Initialize a Router with a key pair and optional server list."""
         self.kp = kp
         self.servers = servers or get_mqtt_server_list()
         self.get_time = get_time
@@ -52,7 +64,7 @@ class Router:
                     self.nic,
                     (host, self.servers[af][host]["port"]),
                     self.kp,
-                    get_time=get_time
+                    get_time=get_time,
                 )
 
                 if msg_handler:
@@ -67,28 +79,30 @@ class Router:
         # Pub key hex -> {"updated", "clients"}
         self.cache = {}
 
-    def add_msg_handler(self, msg_handler):
+    def add_msg_handler(self, msg_handler: Callable) -> None:
+        """Register a message handler on all managed MQTT clients."""
         for af in self.clients:
             for host in self.clients[af]:
                 self.clients[af][host].add_msg_handler(msg_handler)
 
     # Same function reusable by both sides.
-    async def start(self):
+    async def start(self) -> List[Any]:
+        """Connect to the best MQTT servers for this node's own public key."""
         clients = await get_dest_clients(
-            self.nic,
-            self.kp.public_key_hex,
-            self.servers,
-            self.clients
+            self.nic, self.kp.public_key_hex, self.servers, self.clients
         )
 
         # Cache own pub key -> clients mapping.
         self.cache_clients(self.kp.public_key_hex, clients)
         return clients
-    
+
     # Smart pipe intelligently routes over a set of MQTT clients.
-    async def pipe(self, dest_pub_hex, use_cache=False, expiry=3600):
+    async def pipe(
+        self, dest_pub_hex: str, use_cache: bool = False, expiry: int = 3600
+    ) -> SmartPipe:
+        """Create a SmartPipe to the destination, performing rendezvous discovery if needed."""
         now = self.get_time()
-        cached_clients = None
+        cached_clients = None  # type: Optional[List[Any]]
 
         # Attempt to retrieve from cache
         if use_cache and dest_pub_hex in self.cache:
@@ -98,7 +112,7 @@ class Router:
 
         # If we have cached_clients, we pass them in to skip discovery
         smart_pipe = SmartPipe(self, dest_pub_hex, clients=cached_clients)
-        
+
         # Connect (this performs rendezvous discovery ONLY if clients is None)
         await smart_pipe.connect()
 
@@ -107,34 +121,38 @@ class Router:
             self.cache_clients(dest_pub_hex, smart_pipe.clients)
 
         return smart_pipe
-    
-    def cache_clients(self, pub_key_hex, clients):
+
+    def cache_clients(self, pub_key_hex: str, clients: List[Any]) -> None:
+        """Store a client list in the discovery cache for the given public key."""
         now = self.get_time()
-        self.cache[pub_key_hex] = {
-            "updated": now,
-            "clients": clients
-        }
-    
-    async def close(self):
+        self.cache[pub_key_hex] = {"updated": now, "clients": clients}
+
+    async def close(self) -> None:
+        """Close all managed MQTT client connections."""
         for af in self.clients:
             for host in self.clients[af]:
                 client = self.clients[af][host]
                 await client.close()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "Router":
+        """Start the router on context manager entry."""
         await self.start()
         return self
 
-    async def __aexit__(self, *_):
+    async def __aexit__(self, *_: Any) -> bool:
+        """Close all connections on context manager exit."""
         await self.close()
         return False
 
-async def workspace():
+
+async def workspace() -> None:
     nic = Interface("default")
     servers = get_mqtt_server_list()
     kp = Signing.keypair()
 
-    async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+    async def msg_handler(
+        msg: str, src_pk_hex: str, pipe_id_hex: str, client: Any
+    ) -> None:
         print("got ", msg, " from ", src_pk_hex)
 
     router = Router(kp, msg_handler=msg_handler, nic=nic, servers=servers)
@@ -147,6 +165,7 @@ async def workspace():
         await pipe.send("hello world")
     finally:
         await router.close()
+
 
 # TODO: dangling resource in the mqtt ping test code.
 

@@ -1,11 +1,13 @@
-from aionetiface import *
-from .mqtt_defs import *
-from .utils import *
-from .mqtt_packet import *
-from .mqtt_proto import *
+from typing import Any
+from aionetiface import async_wrap_errors
+from .mqtt_packet import mqtt_decode_varint, mqtt_parse_packet
+from .mqtt_proto import handle_mqtt_packet
+
 
 # TCP streaming protocol handler for MQTT.
-async def mqtt_packet_reader(client, chunk, client_tup, pipe):
+async def mqtt_packet_reader(
+    client: Any, chunk: bytes, client_tup: Any, pipe: Any
+) -> None:
     # Nothing received, end.
     if not chunk:
         return
@@ -37,6 +39,4 @@ async def mqtt_packet_reader(client, chunk, client_tup, pipe):
 
         # Parse + handle.
         pkt = mqtt_parse_packet(pkt_buf)
-        await async_wrap_errors(
-            handle_mqtt_packet(client, pkt)
-        )
+        await async_wrap_errors(handle_mqtt_packet(client, pkt))

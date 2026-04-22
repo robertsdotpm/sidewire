@@ -10,16 +10,17 @@ the MQTT protocol possible:
     - eventually disconnects
 """
 
-from aionetiface import *
-from .mqtt_defs import *
-from .utils import *
-from .mqtt_packet import *
-from .app_packet import *
-from .app_proto import *
-from .mqtt_msgs import *
+from typing import Any
+from aionetiface import h_to_b
+from .mqtt_defs import MQTTEnum, MsgEnum
+from .mqtt_packet import mqtt_parse_publish
+from .app_packet import AppPacket
+from .app_proto import process_app_msg, process_app_ack, process_app_probe
+from .mqtt_msgs import build_puback
+
 
 # mqtt_packet_reader sends full packets to this func to handle.
-async def handle_mqtt_packet(client, packet):
+async def handle_mqtt_packet(client: Any, packet: Any) -> None:
     # MQTT server acks a publish or a channel subscribe.
     if packet.type in (MQTTEnum.PUBACK, MQTTEnum.SUBACK):
         await handle_broker_ack(client, packet)
@@ -32,12 +33,13 @@ async def handle_mqtt_packet(client, packet):
     elif packet.type == MQTTEnum.PINGRESP:
         await client.ping_handler()
 
+
 # MQTT packets for publish, puback, subscribe, suback, have packet IDs.
 # The software has a table of packet IDs that point to a future.
 # The future is resolved for acks back from server. Currently, since
 # the software uses app-level ACKS no packet-level awaits are used for
 # these futures but acking here does mean the packet ID should be freed.
-async def handle_broker_ack(client, packet):
+async def handle_broker_ack(client: Any, packet: Any) -> None:
     # Extract packet ID from packet.
     packet_id = packet.body[:2]
     if packet_id not in client.packet_ids[packet.type]:
@@ -47,7 +49,7 @@ async def handle_broker_ack(client, packet):
     ack_future = client.packet_ids[packet.type][packet_id]
     if ack_future.done():
         return
-    
+
     # Resolve packet future.
     if packet.type == MQTTEnum.SUBACK:
         # SUBACK includes return codes in the body.
@@ -60,10 +62,11 @@ async def handle_broker_ack(client, packet):
     # prevents packet IDs from being exhausted over time.
     del client.packet_ids[packet.type][packet_id]
 
+
 # Handles receiving a new message for our ECDSA pub hex topic sub.
 # Messages fall into either acks for a past message or new messages.
 # The software validates signatures and sets futures for acks.
-async def handle_publish(client, packet):
+async def handle_publish(client: Any, packet: Any) -> None:
     # Publish-specific function for parsing a packet.
     parsed = mqtt_parse_publish(packet)
     if not parsed:
@@ -86,7 +89,7 @@ async def handle_publish(client, packet):
         return
 
     # Reject messages older than 2x republish_duration for replay attacks.
-    max_age = 2 * getattr(client, 'republish_duration', 60)
+    max_age = 2 * getattr(client, "republish_duration", 60)
     elapsed = int(client.get_time()) - app_packet.timestamp
     if elapsed > max_age:
         return

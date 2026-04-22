@@ -1,9 +1,22 @@
+from typing import Any, Optional
 from ecdsa import VerifyingKey, SECP256k1, util, BadSignatureError, MalformedPointError
-from aionetiface import *
+from aionetiface import h_to_b, to_b, to_h
+
 
 class AppPacket:
-    def __init__(self, src_pk_hex=None, sig_hex=None, queue_id_hex=None,
-            seq_no=None, timestamp=None, msg_type=None, msg=None):
+    """Represent a signed application-level MQTT message packet."""
+
+    def __init__(
+        self,
+        src_pk_hex: Optional[str] = None,
+        sig_hex: Optional[str] = None,
+        queue_id_hex: Optional[str] = None,
+        seq_no: Optional[int] = None,
+        timestamp: Optional[int] = None,
+        msg_type: Optional[int] = None,
+        msg: Optional[str] = None,
+    ) -> None:
+        """Initialize an AppPacket with optional field values."""
         self.src_pk_hex = src_pk_hex
         self.sig_hex = sig_hex
         self.queue_id_hex = queue_id_hex
@@ -13,26 +26,28 @@ class AppPacket:
         self.msg = msg
 
     @property
-    def seq_no_hex(self):
+    def seq_no_hex(self) -> Optional[str]:
         """Formats the integer sequence number into an 8-char hex string."""
         if self.seq_no is None:
             return None
         return "{:08x}".format(self.seq_no)
 
     @property
-    def timestamp_hex(self):
+    def timestamp_hex(self) -> Optional[str]:
         """Formats the unix timestamp into a 16-char hex string."""
         if self.timestamp is None:
             return None
         return "{:016x}".format(self.timestamp)
 
-    def pack(self, client):
+    def pack(self, client: Any) -> str:
         """
         Equivalent to the packing logic in ordered_ack_send.
         Constructs the full hex string to be sent over the wire.
         """
         if len(self.queue_id_hex) != 64:
-            raise ValueError(f"queue_id_hex must be 64 hex chars, got {len(self.queue_id_hex)}")
+            raise ValueError(
+                f"queue_id_hex must be 64 hex chars, got {len(self.queue_id_hex)}"
+            )
 
         # Stamp creation time once; retransmissions reuse the same packed bytes
         # so the timestamp is always the original send time.
@@ -46,13 +61,14 @@ class AppPacket:
         headered_msg = type_hex + self.msg
 
         # Signed message section: queue_id(64) + seq(8) + timestamp(16) + type+msg
-        signed_msg = self.queue_id_hex + self.seq_no_hex + self.timestamp_hex + headered_msg
+        signed_msg = (
+            self.queue_id_hex + self.seq_no_hex + self.timestamp_hex + headered_msg
+        )
 
         # Sign the binary representation of the hex string
         signed_msg_bytes = to_b(signed_msg)
         sig = client.kp.private_key.sign(
-            signed_msg_bytes,
-            sigencode=util.sigencode_string
+            signed_msg_bytes, sigencode=util.sigencode_string
         )
 
         self.sig_hex = to_h(sig)
@@ -65,7 +81,7 @@ class AppPacket:
         return out
 
     @classmethod
-    def unpack(cls, payload):
+    def unpack(cls, payload: str) -> Optional["AppPacket"]:
         """
         Equivalent to the parsing logic in handle_publish.
         Validates signatures and returns an instance of AppPacket.
@@ -77,16 +93,12 @@ class AppPacket:
             sig_bytes = h_to_b(sig_hex)
             signed_msg_hex = payload[194:]
             signed_msg_bytes = to_b(signed_msg_hex)
-            
+
             # Verify ECDSA Signature
             vk_bytes = h_to_b(src_pk_hex)
             vk = VerifyingKey.from_string(vk_bytes, curve=SECP256k1)
-            
-            vk.verify(
-                sig_bytes, 
-                signed_msg_bytes, 
-                sigdecode=util.sigdecode_string
-            )
+
+            vk.verify(sig_bytes, signed_msg_bytes, sigdecode=util.sigdecode_string)
         except (BadSignatureError, MalformedPointError, ValueError):
             # Common failure point if keys or signatures are malformed.
             return None
@@ -114,5 +126,5 @@ class AppPacket:
             seq_no=seq_no_int,
             timestamp=timestamp_int,
             msg_type=msg_type,
-            msg=actual_msg
+            msg=actual_msg,
         )

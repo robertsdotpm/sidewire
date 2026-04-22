@@ -1,12 +1,26 @@
-from aionetiface import *
+from typing import Any, Dict, List, Optional
+from aionetiface import (
+    INFRA,
+    IP4,
+    IP6,
+    h_to_b,
+    log_exception,
+    rand_b,
+    rendezvous_score,
+    to_b,
+    to_h,
+)
 import copy
 import asyncio
 from .mqtt.mqtt_defs import MsgEnum
 
-def get_server_score(af, host, pub_key_hex):
+
+def get_server_score(af: Any, host: str, pub_key_hex: str) -> Any:
+    """Compute the rendezvous score for a server given an address family, host, and public key."""
     return rendezvous_score(bytes([int(af)]), h_to_b(pub_key_hex), to_b(host))
 
-def interleave_buckets(af_buckets):
+
+def interleave_buckets(af_buckets: Dict) -> List[Dict]:
     """
     Interleaves the results to guarantee diversity in the top N.
     This ensures IPv4 and IPv6 servers both appear at the start of the list.
@@ -20,12 +34,14 @@ def interleave_buckets(af_buckets):
         for af in sorted(af_buckets.keys()):
             if i < len(af_buckets[af]):
                 process_list.append(af_buckets[af][i])
-    
+
     return process_list
 
-def rendezvous_hash(nic, pub_key_hex, servers):
+
+def rendezvous_hash(nic: Any, pub_key_hex: str, servers: Dict) -> List[Dict]:
+    """Return an interleaved, rendezvous-scored list of servers ranked for the given public key."""
     # We use a dict to group scores by Address Family.
-    af_buckets = {} 
+    af_buckets = {}
     for af in nic.supported():
         af_buckets[af] = []
         for host in servers[af]:
@@ -42,7 +58,15 @@ def rendezvous_hash(nic, pub_key_hex, servers):
     # Final interleaving to ensure protocol diversity.
     return interleave_buckets(af_buckets)
 
-async def try_client(dest_pub_hex, client, connect_timeout=3, probe_timeout=3, retry_duration=1200):
+
+async def try_client(
+    dest_pub_hex: str,
+    client: Any,
+    connect_timeout: int = 3,
+    probe_timeout: int = 3,
+    retry_duration: int = 1200,
+) -> Optional[Any]:
+    """Probe a single MQTT client to verify the destination is reachable; return the client or None."""
     # Connect if not already connected, with rate limiting.
     if client.dispatcher_task is None:
         now = client.get_time()
@@ -67,7 +91,16 @@ async def try_client(dest_pub_hex, client, connect_timeout=3, probe_timeout=3, r
     finally:
         client.dequeue_msg(probe_queue_id, msg_type=MsgEnum.PROBE)
 
-async def get_dest_clients(nic, dest_pub_hex, servers, clients_map, n=4, max_servers=20):
+
+async def get_dest_clients(
+    nic: Any,
+    dest_pub_hex: str,
+    servers: Dict,
+    clients_map: Dict,
+    n: int = 4,
+    max_servers: int = 20,
+) -> List[Any]:
+    """Discover and return up to n MQTT clients that can reach the destination public key."""
     candidate_clients = []
     sorted_servers = rendezvous_hash(nic, dest_pub_hex, servers)
     for server in sorted_servers:
@@ -84,10 +117,9 @@ async def get_dest_clients(nic, dest_pub_hex, servers, clients_map, n=4, max_ser
     limit = min(len(candidate_clients), max_servers)
 
     for i in range(0, limit, batch_size):
-        batch = candidate_clients[i:i + batch_size]
+        batch = candidate_clients[i : i + batch_size]
         results = await asyncio.gather(
-            *[try_client(dest_pub_hex, c) for c in batch],
-            return_exceptions=True
+            *[try_client(dest_pub_hex, c) for c in batch], return_exceptions=True
         )
 
         for client, result in zip(batch, results):
@@ -98,7 +130,9 @@ async def get_dest_clients(nic, dest_pub_hex, servers, clients_map, n=4, max_ser
 
     return found_clients
 
-def get_mqtt_server_list(from_infra=INFRA["MQTT"]):
+
+def get_mqtt_server_list(from_infra: Any = INFRA["MQTT"]) -> Dict:
+    """Parse the INFRA MQTT server list into a dict keyed by address family and hostname."""
     servers = {
         IP4: {},
         IP6: {},

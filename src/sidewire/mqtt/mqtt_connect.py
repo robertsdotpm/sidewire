@@ -7,21 +7,19 @@ when done.
 
 import asyncio
 import random
-from aionetiface import *
-from .mqtt_defs import *
-from .utils import *
-from .mqtt_packet import *
-from .mqtt_ordered_send import *
-from .mqtt_dispatch import *
-from .mqtt_reader import *
-from .mqtt_msgs import *
+from typing import Any, Optional
+from aionetiface import Pipe, TCP, rand_plain, to_hs
+from .utils import reset_session_state
+from .mqtt_reader import mqtt_packet_reader
+from .mqtt_msgs import build_connect
+
 
 # Connect to MQTT server, subcribe to our public key hex.
 # Setup stream-based packet reconstruction handler.
-async def mqtt_connect(self, keep_alive):
+async def mqtt_connect(self: Any, keep_alive: int) -> Any:
     # Incompatible AF.
     if self.af not in self.nic.supported():
-        raise Exception("NIC cant use mqtt AF.")
+        raise ValueError("NIC does not support address family")
 
     """
     In MQTT the client ID determines offline saved message queues.
@@ -37,7 +35,9 @@ async def mqtt_connect(self, keep_alive):
     # Establish TCP Connection
     pipe = await Pipe(TCP, (self.host, self.port), route).connect()
     if not pipe:
-        raise ConnectionError("TCP Connection failed to {}:{}".format(self.host, self.port))
+        raise ConnectionError(
+            "TCP Connection failed to {}:{}".format(self.host, self.port)
+        )
 
     # MQTT Handshake (CONNECT/CONNACK)
     connect_buf = build_connect(self.client_id, keep_alive=keep_alive)
@@ -51,31 +51,32 @@ async def mqtt_connect(self, keep_alive):
         raise ConnectionError("conack timeout")
 
     # Check protocol response for conack.
-    if connack != b' \x02\x00\x00':
+    if connack != b" \x02\x00\x00":
         await pipe.close()
         raise ConnectionError("Invalid MQTT CONNACK: {}".format(connack))
 
     # Message Processing Setup
     self.pipe = pipe
-    
+
     # Register the packet reader callback
-    async def handle_chunks_async(chunk, client_tup, pipe):
+    async def handle_chunks_async(chunk: bytes, client_tup: Any, pipe: Any) -> None:
         return await mqtt_packet_reader(self, chunk, client_tup, pipe)
-    
+
     # Add handler to read chunks.
     pipe.add_msg_cb(handle_chunks_async)
 
     # Public Key Subscription
     await subscribe_to_identity(self, pipe)
-    
+
     # Return connected pipe.
     return pipe
 
+
 # Handles the subscription to the public key topic
-async def subscribe_to_identity(self, pipe):
+async def subscribe_to_identity(self: Any, pipe: Any) -> None:
     # Convert 33 byte compact pub key to hex.
     pub_hex = to_hs(self.kp.compact_public_key)
-    
+
     # Generate sub packet and the future tracking its acknowledgement
     buf, packet_ack_future = self.subscribe(pub_hex)
     await pipe.send(buf)
@@ -85,13 +86,14 @@ async def subscribe_to_identity(self, pipe):
 
     # Only accept QoS 1; reject if server downgraded or errored
     for code in return_codes:
-        if code != 1: 
-            raise Exception(
-                "Subscription failed. Expected QoS 1, got code: {}".format(code)
+        if code != 1:
+            raise ConnectionError(
+                "MQTT subscription failed: expected QoS 1, got code {}".format(code)
             )
-        
+
+
 # Ensure a connection exists before running dispatcher.
-async def reconnect_loop(client, keep_alive):
+async def reconnect_loop(client: Any, keep_alive: int) -> Optional[bool]:
     attempts = 0
     while not client.is_closed.is_set():
         if client.pipe and not client.pipe.on_close.is_set():
@@ -114,6 +116,6 @@ async def reconnect_loop(client, keep_alive):
             pass
 
         # Exponential backoff with jitter: 1s, 2s, 4s, ... capped at 60s.
-        cap = min(2 ** attempts, 60)
+        cap = min(2**attempts, 60)
         await asyncio.sleep(random.uniform(0, cap))
         attempts += 1

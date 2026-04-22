@@ -1,10 +1,12 @@
 import hashlib
-from aionetiface import *
-from .mqtt_defs import *
-from .utils import *
+from typing import Any
+from aionetiface import async_wrap_errors, log_exception, to_b
+from .mqtt_defs import MsgEnum
+from .utils import get_msg_from_queue
+
 
 # Function called for new application (type=msg) publishes.
-async def process_app_msg(client, app_packet):
+async def process_app_msg(client: Any, app_packet: Any) -> None:
     # Using the integer directly from the object.
     seq_no = app_packet.seq_no
     queue_id = app_packet.queue_id_hex
@@ -20,25 +22,23 @@ async def process_app_msg(client, app_packet):
     if queue_id in msg_ack_queues:
         # List of sequenced app-level ack metas.
         ack_queue = msg_ack_queues[queue_id]
-        
+
         # Remove queued application acks that are no longer relevant.
         for old_seq in list(ack_queue.keys()):
             if old_seq < seq_no:
                 del ack_queue[old_seq]
-        
+
         # If we already acked this in the past reuse existing queued app ack.
         if seq_no in ack_queue:
             # Structure for an app-level ack message.
             meta = ack_queue[seq_no]
             out, packet_ack = client.publish(
-                meta["dest_pk_hex"], 
+                meta["dest_pk_hex"],
                 meta["out"],
             )
 
             # Republish the application ack to sender.
-            await async_wrap_errors(
-                client.pipe.send(out)
-            )
+            await async_wrap_errors(client.pipe.send(out))
 
             return
 
@@ -52,28 +52,21 @@ async def process_app_msg(client, app_packet):
 
         # Trigger registered app handlers
         for msg_handler in client.msg_handlers:
-            await async_wrap_errors(
-                msg_handler(msg, src_pk, queue_id, client)
-            )
+            await async_wrap_errors(msg_handler(msg, src_pk, queue_id, client))
 
     # Send Application ACK back to sender
     try:
-        client.queue_msg(
-            "ack",
-            src_pk,
-            queue_id,
-            MsgEnum.MSGACK,
-            seq_no=seq_no
-        )
+        client.queue_msg("ack", src_pk, queue_id, MsgEnum.MSGACK, seq_no=seq_no)
     except (ValueError, KeyError):
         log_exception()
 
+
 # Function called for new application (type=probe) publishes.
 # ACKs the sender so discovery works, but never calls user handlers.
-async def process_app_probe(client, app_packet):
+async def process_app_probe(client: Any, app_packet: Any) -> None:
     # Does message already exist.
     found_msg = get_msg_from_queue(
-        client, 
+        client,
         app_packet.queue_id_hex,
         app_packet.seq_no,
     )
@@ -81,7 +74,7 @@ async def process_app_probe(client, app_packet):
     # Suppress already queued response assert errors.
     if found_msg:
         return
-        
+
     # Otherwise schedule an ack for it.
     try:
         client.queue_msg(
@@ -89,13 +82,14 @@ async def process_app_probe(client, app_packet):
             app_packet.src_pk_hex,
             app_packet.queue_id_hex,
             MsgEnum.MSGACK,
-            seq_no=app_packet.seq_no
+            seq_no=app_packet.seq_no,
         )
     except (ValueError, KeyError):
         log_exception()
 
+
 # Function called for new application (type=msgack) publishes.
-def process_app_ack(client, app_packet):
+def process_app_ack(client: Any, app_packet: Any) -> None:
     # Pull fields directly from the object
     queue_id = app_packet.queue_id_hex
     seq_no = app_packet.seq_no

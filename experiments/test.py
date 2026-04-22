@@ -13,9 +13,10 @@ MAX_WINDOWS = 4
 # Hashing + scoring
 # ---------------------------
 
+
 def hash_to_uniform(pubkey: str, server: str) -> float:
     h = hashlib.sha256((pubkey + server).encode()).digest()
-    x = int.from_bytes(h, 'big')
+    x = int.from_bytes(h, "big")
     return (x + 1) / (2**256)  # (0,1]
 
 
@@ -28,11 +29,9 @@ def weighted_score(pubkey: str, server: str, weight: float) -> float:
 # Ranking
 # ---------------------------
 
+
 def rendezvous_rank_weighted(pubkey, servers, weights):
-    scored = [
-        (weighted_score(pubkey, s, weights[s]), s)
-        for s in servers
-    ]
+    scored = [(weighted_score(pubkey, s, weights[s]), s) for s in servers]
     scored.sort()
     return [s for _, s in scored]
 
@@ -40,6 +39,7 @@ def rendezvous_rank_weighted(pubkey, servers, weights):
 # ---------------------------
 # Routing simulation
 # ---------------------------
+
 
 def attempt_windows(ranked):
     for i in range(MAX_WINDOWS):
@@ -57,9 +57,9 @@ def route(pubkey, servers_a, servers_b, weights_a, weights_b, verbose=True):
         print("A:", ranked_a)
         print("B:", ranked_b)
 
-    for i, (win_a, win_b) in enumerate(zip(attempt_windows(ranked_a),
-                                           attempt_windows(ranked_b))):
-
+    for i, (win_a, win_b) in enumerate(
+        zip(attempt_windows(ranked_a), attempt_windows(ranked_b))
+    ):
         overlap = set(win_a).intersection(win_b)
 
         if verbose:
@@ -78,14 +78,17 @@ def route(pubkey, servers_a, servers_b, weights_a, weights_b, verbose=True):
 # Test data generation
 # ---------------------------
 
+
 def random_ipv4():
-    return f"192.168.1.{random.randint(1,254)}"
+    return f"192.168.1.{random.randint(1, 254)}"
+
 
 def random_ipv6():
-    return f"2001:db8::{random.randint(1,1000)}"
+    return f"2001:db8::{random.randint(1, 1000)}"
+
 
 def random_host():
-    return f"node{random.randint(1,100)}.example.com"
+    return f"node{random.randint(1, 100)}.example.com"
 
 
 def random_servers(n):
@@ -125,6 +128,7 @@ def make_partial_overlap(a, b, overlap_count):
 # Main test
 # ---------------------------
 
+
 def run_test():
     random.seed(42)
 
@@ -156,12 +160,7 @@ def run_test():
 
     # Run routing simulation
     success, overlap, window = route(
-        pubkey,
-        servers_a,
-        servers_b,
-        weights_a,
-        weights_b,
-        verbose=True
+        pubkey, servers_a, servers_b, weights_a, weights_b, verbose=True
     )
 
     print("\n=== RESULT ===")

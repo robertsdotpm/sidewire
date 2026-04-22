@@ -8,8 +8,11 @@ These tests run entirely offline — no MQTT broker or network required.
 import struct
 import unittest
 from aionetiface import (
-    Signing, IP4, IP6, Interface,
-    h_to_b, to_b, to_h, rand_b,
+    Signing,
+    IP4,
+    IP6,
+    to_h,
+    rand_b,
 )
 from sidewire.mqtt.utils import (
     mqtt_encode_varint,
@@ -27,6 +30,7 @@ from sidewire.utils import interleave_buckets, get_server_score
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_client_stub(kp=None, get_time=None):
     """Minimal object mimicking the fields AppPacket.pack() reads."""
@@ -49,8 +53,8 @@ def _make_queue_id():
 # MQTT varint encoding/decoding
 # ---------------------------------------------------------------------------
 
-class TestMQTTVarint(unittest.TestCase):
 
+class TestMQTTVarint(unittest.TestCase):
     def _roundtrip(self, value):
         encoded = mqtt_encode_varint(value)
         decoded, consumed = mqtt_decode_varint(encoded, 0)
@@ -103,8 +107,8 @@ class TestMQTTVarint(unittest.TestCase):
 # MQTT string encoding
 # ---------------------------------------------------------------------------
 
-class TestMQTTEncStr(unittest.TestCase):
 
+class TestMQTTEncStr(unittest.TestCase):
     def test_length_prefix_correct(self):
         s = "hello"
         encoded = mqtt_enc_str(s)
@@ -136,8 +140,8 @@ class TestMQTTEncStr(unittest.TestCase):
 # AppPacket pack / unpack
 # ---------------------------------------------------------------------------
 
-class TestAppPacketRoundTrip(unittest.TestCase):
 
+class TestAppPacketRoundTrip(unittest.TestCase):
     def _make_packet(self, msg="hello", msg_type=MsgEnum.MSG, seq_no=1):
         queue_id = _make_queue_id()
         return AppPacket(
@@ -265,8 +269,8 @@ class TestAppPacketRoundTrip(unittest.TestCase):
 # Rendezvous / interleaving utilities
 # ---------------------------------------------------------------------------
 
-class TestInterleave(unittest.TestCase):
 
+class TestInterleave(unittest.TestCase):
     def test_equal_buckets_interleaved(self):
         buckets = {
             IP4: [{"v": "a1"}, {"v": "a2"}],
@@ -295,7 +299,6 @@ class TestInterleave(unittest.TestCase):
 
 
 class TestGetServerScore(unittest.TestCase):
-
     def test_same_inputs_same_score(self):
         kp = Signing.keypair()
         s1 = get_server_score(IP4, "server1.example.com", kp.public_key_hex)
@@ -331,8 +334,8 @@ class TestGetServerScore(unittest.TestCase):
 # Message queue iteration / pruning helpers
 # ---------------------------------------------------------------------------
 
-class TestIterAllMessages(unittest.TestCase):
 
+class TestIterAllMessages(unittest.TestCase):
     def _make_queue(self):
         return {
             MsgEnum.MSG: {},
@@ -365,10 +368,10 @@ class TestIterAllMessages(unittest.TestCase):
 
 
 class TestPruneMsgIds(unittest.TestCase):
-
     def _make_client(self, republish_duration=60):
         class _Stub:
             pass
+
         c = _Stub()
         c.republish_duration = republish_duration
         c.recv_msg_ids = {}
@@ -408,7 +411,6 @@ class TestPruneMsgIds(unittest.TestCase):
 
 
 class TestGetMsgFromQueue(unittest.TestCase):
-
     def _make_queue(self):
         return {
             MsgEnum.MSG: {},
@@ -418,22 +420,26 @@ class TestGetMsgFromQueue(unittest.TestCase):
     def test_existing_message_returned(self):
         class _Stub:
             msg_queues = {MsgEnum.MSGACK: {"queueabc": {1: "payload"}}}
+
         result = get_msg_from_queue(_Stub(), "queueabc", 1, MsgEnum.MSGACK)
         self.assertEqual(result, "payload")
 
     def test_missing_queue_id_returns_none(self):
         class _Stub:
             msg_queues = {MsgEnum.MSGACK: {}}
+
         self.assertIsNone(get_msg_from_queue(_Stub(), "nonexistent", 1, MsgEnum.MSGACK))
 
     def test_missing_seq_no_returns_none(self):
         class _Stub:
             msg_queues = {MsgEnum.MSGACK: {"q": {2: "x"}}}
+
         self.assertIsNone(get_msg_from_queue(_Stub(), "q", 999, MsgEnum.MSGACK))
 
     def test_found_message_returned(self):
         class _Stub:
             msg_queues = {MsgEnum.MSGACK: {"q": {1: "hello"}}}
+
         result = get_msg_from_queue(_Stub(), "q", 1, MsgEnum.MSGACK)
         self.assertEqual(result, "hello")
 

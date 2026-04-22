@@ -7,7 +7,7 @@ for each queue_id_hex based on whether its a message or an ack for a msg.
 
 topic (66 dest ecdsa pub key)
     66 our_hex_pub_key,
-    128 sig over 
+    128 sig over
         ( 64 queue_id_hex, 8 seq_no_hex, 2 msg_type_hex msg ... )
 
 messages are queued by:
@@ -20,14 +20,21 @@ meta:
 """
 
 import asyncio
-from aionetiface import *
-from .mqtt_defs import *
-from .utils import *
-from .mqtt_packet import *
-from .mqtt_proto import *
-from .app_packet import *
+import hashlib
+from typing import Optional, Tuple, Any
+from aionetiface import log, to_b
+from .mqtt_defs import MsgEnum
+from .app_packet import AppPacket
 
-def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MSG, seq_no=None):
+
+def ordered_ack_send(
+    client: Any,
+    msg: str,
+    dest_pk_hex: str,
+    queue_id_hex: str,
+    msg_type: MsgEnum = MsgEnum.MSG,
+    seq_no: Optional[int] = None,
+) -> Tuple[Tuple[str, int], asyncio.Future]:
     if len(queue_id_hex) != 64:
         raise ValueError(f"queue_id_hex must be 64 hex chars, got {len(queue_id_hex)}")
     if len(dest_pk_hex) != 66:
@@ -53,12 +60,9 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
 
     # Pack the message using AppPacket (handles signing and header construction).
     packet = AppPacket(
-        queue_id_hex=queue_id_hex,
-        seq_no=seq_no,
-        msg_type=msg_type,
-        msg=msg
+        queue_id_hex=queue_id_hex, seq_no=seq_no, msg_type=msg_type, msg=msg
     )
-    
+
     # This replaces the manual hex concatenation and signing block.
     out = packet.pack(client)
 
@@ -74,25 +78,19 @@ def ordered_ack_send(client, msg, dest_pk_hex, queue_id_hex, msg_type=MsgEnum.MS
     client.msg_queues[msg_type][queue_id_hex][seq_no] = {
         # Application-level ack -- allows to confirm msg delivery.
         "app_ack": app_ack,
-
         # Where to send the message to.
         "dest_pk_hex": dest_pk_hex,
-
         # Allows for sequential send and ordering.
         "seq_no": seq_no,
-
         # A serialized buffer of an app packet to put into a mqtt publish.
         "out": out,
-
         # Last updated time at 0.
         "updated": 0,
-
         # Created now.
         "created": client.get_time(),
-
         # Track rebroadcast count.
         "amount": 0,
     }
-    
+
     # Caller can await ack if they want.
     return (queue_id_hex, seq_no), app_ack

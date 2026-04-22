@@ -44,18 +44,39 @@ Everything ended up under 700 lines of code which I think is pretty good!
 import hashlib
 import asyncio
 import time
-from aionetiface import *
-from .mqtt_defs import *
-from .utils import *
-from .mqtt_packet import *
-from .mqtt_proto import *
-from .mqtt_ordered_send import *
-from .mqtt_dispatch import *
-from .mqtt_connect import *
-from .mqtt_msgs import *
+from typing import Any, Callable, Optional, Tuple
+from aionetiface import (
+    IP4,
+    Interface,
+    Signing,
+    async_run,
+    async_wrap_errors,
+    cancel_task,
+    is_ascii,
+    rand_b,
+    to_h,
+    to_hs,
+)
+from .mqtt_defs import MQTT_KEEP_ALIVE, MsgEnum, MQTTEnum
+from .utils import packet_ack_future
+from .mqtt_ordered_send import ordered_ack_send
+from .mqtt_dispatch import dispatcher
+from .mqtt_connect import mqtt_connect
+from .mqtt_msgs import build_subscribe, build_publish, build_disconnect
+
 
 class MQTTClient:
-    def __init__(self, af, nic, dest, kp, get_time=time.time):
+    """Async MQTT client with identity-based subscriptions and reliable delivery."""
+
+    def __init__(
+        self,
+        af: Any,
+        nic: Any,
+        dest: Tuple[str, int],
+        kp: Any,
+        get_time: Callable[[], float] = time.time,
+    ) -> None:
+        """Initialize an MQTTClient with network, destination, and key-pair settings."""
         # Addressing info for connected MQTT server.
         self.af = af
         self.nic = nic
@@ -63,7 +84,7 @@ class MQTTClient:
         self.host, self.port = dest
 
         # ECDSA key pair for signing high-level sequenced messages over MQTT.
-        self.kp = kp 
+        self.kp = kp
 
         # Handle received messages.
         self.msg_handlers = []
@@ -104,16 +125,27 @@ class MQTTClient:
         self.get_time = get_time
 
     # Receive back app protocol msgs unpacked.
-    def add_msg_handler(self, msg_handler):
+    def add_msg_handler(self, msg_handler: Callable) -> None:
+        """Register a callback to receive decoded incoming application messages."""
         self.msg_handlers.append(msg_handler)
 
     # Allow awaiting on the class object directly.
-    def __await__(self):
+    def __await__(self) -> Any:
+        """Allow the client to be directly awaited as a shorthand for connect()."""
         return self.connect().__await__()
-    
+
     # Connect to MQTT server and subscribe to our own pub key hex topic.
     # Also will start a background task that dispatches messages from self.send.
-    async def connect(self, republish_duration=60, interval=2, keep_alive=MQTT_KEEP_ALIVE, ignore_acked=False, reconnect_delay=0, timeout=4):
+    async def connect(
+        self,
+        republish_duration: int = 60,
+        interval: int = 2,
+        keep_alive: int = MQTT_KEEP_ALIVE,
+        ignore_acked: bool = False,
+        reconnect_delay: int = 0,
+        timeout: int = 4,
+    ) -> Any:
+        """Connect to the MQTT server and start the background message dispatcher."""
         # Re-entry guard.
         if self.dispatcher_task:
             return self.pipe
@@ -148,53 +180,64 @@ class MQTTClient:
 
     # Internal: used to subscribe to own pub key hex.
     # Returns packet and future to await ack for the packet from the server.
-    def subscribe(self, topic):
+    def subscribe(self, topic: str) -> Tuple[bytes, asyncio.Future]:
+        """Build a SUBSCRIBE packet and return it with a future for the server SUBACK."""
         if not isinstance(topic, str):
             raise TypeError(f"topic must be str, got {type(topic).__name__}")
         packet_id, packet_ack = packet_ack_future(self, MQTTEnum.SUBACK)
         buf = build_subscribe(topic, packet_id)
         return buf, packet_ack
-    
+
     # High level function: send a message to a dest pub key hash (topic.)
     # Puts the msg in a sequenced queue called queue_id_hex to be republished.
     # A background dispatcher task loops over these queues to repub messages.
-    def queue_msg(self, msg, dest_pk_hex, queue_id_hex=None, msg_type=MsgEnum.MSG, seq_no=None):
+    def queue_msg(
+        self,
+        msg: str,
+        dest_pk_hex: str,
+        queue_id_hex: Optional[str] = None,
+        msg_type: MsgEnum = MsgEnum.MSG,
+        seq_no: Optional[int] = None,
+    ) -> Tuple[Tuple[str, int], asyncio.Future]:
+        """Queue a signed message for reliable delivery to the given destination public key."""
         queue_id_hex = queue_id_hex or to_h(rand_b(32))
-        return ordered_ack_send(
-            self,
-            msg,
-            dest_pk_hex,
-            queue_id_hex,
-            msg_type,
-            seq_no
-        )
-    
+        return ordered_ack_send(self, msg, dest_pk_hex, queue_id_hex, msg_type, seq_no)
+
     # Stops broadcasting a msg.
-    def dequeue_msg(self, queue_id_hex, seq_no=None, msg_type=MsgEnum.MSG):
+    def dequeue_msg(
+        self,
+        queue_id_hex: str,
+        seq_no: Optional[int] = None,
+        msg_type: MsgEnum = MsgEnum.MSG,
+    ) -> None:
+        """Stop retransmitting a queued message, optionally scoped to a sequence number."""
         # Get queue by queue id.
         queue = self.msg_queues[msg_type]
         if queue_id_hex not in queue:
             return
-        
+
         # If no seq_no set delete the whole queue.
         if seq_no is None:
             del self.msg_queues[msg_type][queue_id_hex]
             return
-        
+
         # Otherwise: disable it to preserve seq_no offsets.
         if seq_no not in self.msg_queues[msg_type][queue_id_hex]:
             return
-        
+
         # Get the app ack future.
         app_ack = self.msg_queues[msg_type][queue_id_hex][seq_no]["app_ack"]
         if app_ack.done():
             return
-        
+
         app_ack.set_result(True)
 
     # Internal: used to publish signed messages to pub key hashed topics.
     # Returns packet and future to await ack for the packet from the server.
-    def publish(self, topic, payload, dup=False):
+    def publish(
+        self, topic: str, payload: str, dup: bool = False
+    ) -> Tuple[bytes, asyncio.Future]:
+        """Build a PUBLISH packet and return it with a future for the broker PUBACK."""
         if not is_ascii(topic):
             raise ValueError("topic must be ASCII")
         if not is_ascii(payload):
@@ -202,13 +245,14 @@ class MQTTClient:
         packet_id, packet_ack = packet_ack_future(self, MQTTEnum.PUBACK)
         buf = build_publish(topic, payload, packet_id, dup)
         return buf, packet_ack
-    
+
     # Cleanly disconnect from MQTT server.
-    async def close(self):
+    async def close(self) -> None:
+        """Cleanly shut down the dispatcher, send DISCONNECT, and close the pipe."""
         # Already closed.
         if self.is_closed.is_set():
             return
-        
+
         # Indicate closed to block other callers.
         self.is_closed.set()
 
@@ -222,30 +266,34 @@ class MQTTClient:
         if self.pipe:
             # Disconnect packet.
             disconnect_buf = build_disconnect()
-            await async_wrap_errors(
-                self.pipe.send(disconnect_buf)
-            )
+            await async_wrap_errors(self.pipe.send(disconnect_buf))
 
             # Close pipe.
             await self.pipe.close()
             self.pipe = None
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "MQTTClient":
+        """Connect on context manager entry."""
         await self.connect()
         return self
 
-    async def __aexit__(self, *_):
+    async def __aexit__(self, *_: Any) -> bool:
+        """Close on context manager exit."""
         await self.close()
         return False
 
-    async def ping_handler(self):
+    async def ping_handler(self) -> None:
+        """Handle a PINGRESP from the server (no-op by default)."""
         pass
 
-async def demo_mqtt():
+
+async def demo_mqtt() -> None:
     """Demo: connect two clients (Alice and Bob) and send a message."""
     nic = Interface("default")
 
-    async def msg_handler(msg, src_pk_hex, queue_id_hex, client):
+    async def msg_handler(
+        msg: str, src_pk_hex: str, queue_id_hex: str, client: Any
+    ) -> None:
         print("msg handler got ", msg, " ", src_pk_hex, " ", queue_id_hex)
 
     alice_kp = Signing.keypair()
@@ -263,7 +311,7 @@ async def demo_mqtt():
         _, bob_ack = alice_client.queue_msg(
             "hello bob -- with ordering and ack",
             to_hs(bob_kp.compact_public_key),
-            alice_queue_id
+            alice_queue_id,
         )
 
         await bob_ack
@@ -272,6 +320,7 @@ async def demo_mqtt():
     finally:
         await alice_client.close()
         await bob_client.close()
+
 
 if __name__ == "__main__":
     async_run(demo_mqtt())

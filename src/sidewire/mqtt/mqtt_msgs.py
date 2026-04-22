@@ -1,54 +1,60 @@
 import struct
-from aionetiface import *
-from .mqtt_defs import *
-from .utils import *
-from .mqtt_packet import *
+from typing import Optional, Tuple, Callable
+from aionetiface import to_b
+from .mqtt_defs import MQTTEnum
+from .utils import mqtt_encode_varint, mqtt_enc_str
+from .mqtt_packet import MQTTPacket
 
-def build_connect(client_id, keep_alive=60):
+
+def build_connect(client_id: str, keep_alive: int = 60) -> bytes:
     # proto name, proto level, clean session, keep alive 60s
-    vh = (
-        mqtt_enc_str("MQTT") + 
-        b"\x04" + 
-        b"\x02" + 
-        struct.pack("!H", keep_alive)
-    )
+    vh = mqtt_enc_str("MQTT") + b"\x04" + b"\x02" + struct.pack("!H", keep_alive)
     pl = mqtt_enc_str(client_id)
 
     # Full packet to send.
     pkt = b"\x10" + mqtt_encode_varint(len(vh) + len(pl)) + vh + pl
     return pkt
 
-def build_subscribe(topic, packet_id):
+
+def build_subscribe(topic: str, packet_id: bytes) -> bytes:
     vh = packet_id
     pl = mqtt_enc_str(topic) + b"\x01"  # QoS 1
     pkt = b"\x82" + mqtt_encode_varint(len(vh) + len(pl)) + vh + pl
     return pkt
 
-def build_publish(topic, payload, packet_id, dup=False):
+
+def build_publish(
+    topic: str, payload: str, packet_id: bytes, dup: bool = False
+) -> bytes:
     topic_bytes = mqtt_enc_str(topic)
     pl = topic_bytes + packet_id + to_b(payload)
 
     # Base: PUBLISH + QoS1
-    header = 0x30 | (1 << 1)   # 0x32
+    header = 0x30 | (1 << 1)  # 0x32
     if dup:
         header |= 0x08  # set DUP bit
 
     pkt = bytes([header]) + mqtt_encode_varint(len(pl)) + pl
     return pkt
 
-def build_ping(last_ping, keep_alive, get_time):
+
+def build_ping(
+    last_ping: float, keep_alive: int, get_time: Callable[[], float]
+) -> Tuple[float, Optional[bytes]]:
     now = get_time()
     if now - last_ping >= keep_alive:
         req = MQTTPacket(MQTTEnum.PINGREQ)
         buf = req.build()
         return now, buf
-    
+
     return last_ping, None
 
-def build_puback(packet_id):
+
+def build_puback(packet_id: bytes) -> bytes:
     buf = bytes([0x40, 0x02]) + packet_id
     return buf
 
-def build_disconnect():
+
+def build_disconnect() -> bytes:
     buf = bytes([0xE0, 0x00])
     return buf

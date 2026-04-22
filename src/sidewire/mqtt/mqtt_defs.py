@@ -1,13 +1,19 @@
 from enum import IntEnum
 
-MQTT_KEEP_ALIVE = 10
+MQTT_KEEP_ALIVE: int = 10
+
 
 class MsgEnum(IntEnum):
+    """Enumerate application-level message types."""
+
     MSG = 1
     MSGACK = 2
     PROBE = 3
 
+
 class MQTTEnum(IntEnum):
+    """Enumerate MQTT control packet types."""
+
     CONNECT = 1
     CONNACK = 2
     PUBLISH = 3
