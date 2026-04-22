@@ -14,6 +14,7 @@ class MQTTPacket:
         self.flags = flags
         self.variable_header = b""
         self.payload = b""
+        self.body = b""
 
     def set_variable_header(self, data: Any) -> None:
         """Set the variable header from an int (packed as big-endian short) or bytes."""
@@ -39,7 +40,6 @@ class MQTTPacket:
 
     def debug_print(self) -> None:
         """Print packet debug info (no-op placeholder)."""
-        pass
 
 
 def mqtt_parse_packet(raw: bytes) -> "MQTTPacket":

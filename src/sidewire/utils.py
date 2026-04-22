@@ -1,3 +1,5 @@
+import copy
+import asyncio
 from typing import Any, Dict, List, Optional
 from aionetiface import (
     INFRA,
@@ -10,8 +12,6 @@ from aionetiface import (
     to_b,
     to_h,
 )
-import copy
-import asyncio
 from .mqtt.mqtt_defs import MsgEnum
 
 

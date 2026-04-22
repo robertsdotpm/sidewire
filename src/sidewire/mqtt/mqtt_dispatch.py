@@ -113,7 +113,7 @@ async def republish_meta(
     meta["attempts"] = attempts + 1
 
     # Create publish packet to send.
-    buf, packet_ack = client.publish(
+    buf, _ = client.publish(
         meta["dest_pk_hex"],
         meta["out"],
     )

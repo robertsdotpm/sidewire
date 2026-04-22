@@ -1,7 +1,7 @@
-from aionetiface import log_exception, rand_b, to_h
-from .utils import get_dest_clients
 import asyncio
 from typing import Any, Callable, List, Optional
+from aionetiface import log_exception, rand_b, to_h
+from .utils import get_dest_clients
 
 
 class SmartPipe:

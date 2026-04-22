@@ -121,6 +121,9 @@ class MQTTClient:
         # Background task for processing messages.
         self.dispatcher_task = None
 
+        # Set in connect(); initialized here to satisfy attribute-defined-outside-init.
+        self.republish_duration = 0
+
         # Used to get unix timestamp.
         self.get_time = get_time
 
@@ -156,8 +159,8 @@ class MQTTClient:
         # Connect with a timeout.
         try:
             pipe = await asyncio.wait_for(mqtt_connect(self, keep_alive), timeout)
-        except asyncio.TimeoutError:
-            raise ConnectionError("MQTT connection timeout.")
+        except asyncio.TimeoutError as exc:
+            raise ConnectionError("MQTT connection timeout.") from exc
 
         # Start the background dispatcher after connect() returns so that
         # self.pipe is already set when the dispatcher's reconnect loop first runs,
@@ -284,7 +287,6 @@ class MQTTClient:
 
     async def ping_handler(self) -> None:
         """Handle a PINGRESP from the server (no-op by default)."""
-        pass
 
 
 async def demo_mqtt() -> None:

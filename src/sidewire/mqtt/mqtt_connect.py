@@ -42,9 +42,9 @@ async def mqtt_connect(self: Any, keep_alive: int) -> Any:
     # Expecting a standard 4-byte CONNACK (0x20 0x02 0x00 0x00)
     try:
         connack = await asyncio.wait_for(pipe.recv_n(4), timeout=4)
-    except asyncio.TimeoutError:
+    except asyncio.TimeoutError as exc:
         await pipe.close()
-        raise ConnectionError("conack timeout")
+        raise ConnectionError("conack timeout") from exc
 
     # Check protocol response for conack.
     if connack != b" \x02\x00\x00":

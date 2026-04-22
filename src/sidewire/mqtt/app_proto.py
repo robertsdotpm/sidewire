@@ -33,7 +33,7 @@ async def process_app_msg(client: Any, app_packet: Any) -> None:
         if seq_no in ack_queue:
             # Structure for an app-level ack message.
             meta = ack_queue[seq_no]
-            out, packet_ack = client.publish(
+            out, _ = client.publish(
                 meta["dest_pk_hex"],
                 meta["out"],
             )

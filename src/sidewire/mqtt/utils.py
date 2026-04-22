@@ -111,7 +111,6 @@ def get_packet_id(client: Any) -> bytes:
 
 async def blank_ping_handler(self: Any) -> None:
     """No-op ping handler used as a default when no ping response processing is needed."""
-    pass
 
 
 def prune_msg_ids(client: Any, now: float) -> None:
