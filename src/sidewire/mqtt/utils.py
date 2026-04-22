@@ -108,7 +108,7 @@ def get_packet_id(client: Any) -> bytes:
         pid = struct.pack(">H", client.packet_id)
         if not any(pid in client.packet_ids[pt] for pt in client.packet_ids):
             return pid
-    raise RuntimeError("All 65535 MQTT packet IDs are in-flight")
+    raise AssertionError("All 65535 MQTT packet IDs are in-flight")
 
 
 # Mostly used to test ping resps are received.

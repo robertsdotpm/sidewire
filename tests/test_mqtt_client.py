@@ -224,6 +224,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
 
     async def test_multiple_servers(self):
         host_list = [
+            "ovh1.p2pd.net",
             "test.mosquitto.org",
             "broker.emqx.io",
             "iot.coreflux.cloud",
