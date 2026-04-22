@@ -146,6 +146,7 @@ class Router:
 
 
 async def workspace() -> None:
+    """Run an end-to-end smoke test that connects a Router and sends a message to itself."""
     nic = Interface("default")
     servers = get_mqtt_server_list()
     kp = Signing.keypair()
@@ -153,6 +154,7 @@ async def workspace() -> None:
     async def msg_handler(
         msg: str, src_pk_hex: str, pipe_id_hex: str, client: Any
     ) -> None:
+        """Print received messages to stdout for workspace debugging."""
         print("got ", msg, " from ", src_pk_hex)
 
     router = Router(kp, msg_handler=msg_handler, nic=nic, servers=servers)

@@ -15,6 +15,7 @@ from .mqtt_msgs import build_ping
 
 # Cleanup handled by mqtt_client.close.
 async def safe_pipe_send(client: Any, buf: bytes) -> bool:
+    """Send bytes on the client pipe only if it is open, returning True on success."""
     if not client.pipe or client.pipe.on_close.is_set():
         return False
     await async_wrap_errors(client.pipe.send(buf))
@@ -29,7 +30,7 @@ async def dispatcher(
     ignore_acked: bool = False,
     reconnect_delay: int = 0,
 ) -> None:
-    republish_duration = max(republish_duration, 2 * keep_alive)
+    """Background loop that reconnects the pipe, republishes queued messages, and sends keep-alive pings."""
     last_ping = client.get_time()
     try:
         # Loop forever until is close is set or task cancelled.
@@ -77,6 +78,7 @@ async def republish_meta(
     republish_duration: int,
     ignore_acked: bool,
 ) -> None:
+    """Republish a single queued message if its retry interval has elapsed and its lifetime has not expired."""
     # Message has already been acked.
     if ignore_acked:
         if meta["app_ack"].done():

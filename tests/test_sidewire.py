@@ -18,4 +18,4 @@ class TestSignaling(unittest.IsolatedAsyncioTestCase):
 
 
 if __name__ == "__main__":
-    main()
+    unittest.main()

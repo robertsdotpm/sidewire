@@ -167,7 +167,7 @@ class MQTTClient:
                 async_wrap_errors(
                     dispatcher(
                         self,
-                        republish_duration=republish_duration,
+                        republish_duration=self.republish_duration,
                         interval=interval,
                         keep_alive=keep_alive,
                         ignore_acked=ignore_acked,
@@ -183,7 +183,7 @@ class MQTTClient:
     def subscribe(self, topic: str) -> Tuple[bytes, asyncio.Future]:
         """Build a SUBSCRIBE packet and return it with a future for the server SUBACK."""
         if not isinstance(topic, str):
-            raise TypeError(f"topic must be str, got {type(topic).__name__}")
+            raise TypeError("topic must be str, got {}".format(type(topic).__name__))
         packet_id, packet_ack = packet_ack_future(self, MQTTEnum.SUBACK)
         buf = build_subscribe(topic, packet_id)
         return buf, packet_ack
@@ -294,6 +294,7 @@ async def demo_mqtt() -> None:
     async def msg_handler(
         msg: str, src_pk_hex: str, queue_id_hex: str, client: Any
     ) -> None:
+        """Print the received message, sender public key, and queue ID during the demo."""
         print("msg handler got ", msg, " ", src_pk_hex, " ", queue_id_hex)
 
     alice_kp = Signing.keypair()

@@ -43,6 +43,7 @@ class MQTTPacket:
 
 
 def mqtt_parse_packet(raw: bytes) -> "MQTTPacket":
+    """Parse raw bytes into an MQTTPacket, leaving the body unparsed."""
     offset = 0
 
     # Fixed header byte
@@ -67,6 +68,7 @@ def mqtt_parse_packet(raw: bytes) -> "MQTTPacket":
 
 
 def mqtt_build_header(remaining_length: int, packet_type: Any, flags: int) -> bytes:
+    """Build the MQTT fixed header bytes for the given packet type, flags, and remaining length."""
     packet_type_part = int(packet_type) << 4
     flags_part = flags & 0x0F
     first_byte = packet_type_part | flags_part
@@ -92,6 +94,7 @@ def mqtt_parse_puback(packet: "MQTTPacket") -> Optional[bytes]:
 def mqtt_parse_publish(
     packet: "MQTTPacket",
 ) -> Optional[Tuple[str, str, Optional[bytes]]]:
+    """Parse a PUBLISH packet body into (topic, payload, packet_id); returns None on malformed input."""
     body = packet.body
     offset = 0
 
@@ -144,5 +147,5 @@ if __name__ == "__main__":
 
     pkt2 = mqtt_parse_packet(raw)
     print(pkt2)
-    print(pkt2.packet_type)
+    print(pkt2.type)
     print(pkt2.payload)

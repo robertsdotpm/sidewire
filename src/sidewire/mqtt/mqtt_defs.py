@@ -1,6 +1,6 @@
 from enum import IntEnum
 
-MQTT_KEEP_ALIVE: int = 10
+MQTT_KEEP_ALIVE = 10
 
 
 class MsgEnum(IntEnum):

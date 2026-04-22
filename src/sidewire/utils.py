@@ -133,16 +133,11 @@ async def get_dest_clients(
 
 def get_mqtt_server_list(from_infra: Any = INFRA["MQTT"]) -> Dict:
     """Parse the INFRA MQTT server list into a dict keyed by address family and hostname."""
-    servers = {
-        IP4: {},
-        IP6: {},
-    }
-
-    servers["IPv4"] = servers[IP4]
-    servers["IPv6"] = servers[IP6]
+    af_map = {"IPv4": IP4, "IPv6": IP6}
+    servers = {IP4: {}, IP6: {}}
 
     # Norm server list.
-    for af_txt in ("IPv4", "IPv6"):
+    for af_txt, af in af_map.items():
         for server_list in from_infra[af_txt]["UDP"]:
             hosts = sorted(server_list[0]["fqns"])
             if len(hosts):
@@ -151,6 +146,6 @@ def get_mqtt_server_list(from_infra: Any = INFRA["MQTT"]) -> Dict:
                 host = server_list[0]["ip"]
 
             server_list[0]["host"] = host
-            servers[af_txt][host] = server_list[0]
+            servers[af][host] = server_list[0]
 
     return servers

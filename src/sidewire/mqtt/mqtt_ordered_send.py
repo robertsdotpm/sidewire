@@ -35,10 +35,15 @@ def ordered_ack_send(
     msg_type: MsgEnum = MsgEnum.MSG,
     seq_no: Optional[int] = None,
 ) -> Tuple[Tuple[str, int], asyncio.Future]:
+    """Queue a signed application message for ordered delivery to dest_pk_hex.
+
+    Returns a (queue_id_hex, seq_no) key and a Future resolved when the
+    remote peer sends an application-level ACK.
+    """
     if len(queue_id_hex) != 64:
-        raise ValueError(f"queue_id_hex must be 64 hex chars, got {len(queue_id_hex)}")
+        raise ValueError("queue_id_hex must be 64 hex chars, got {}".format(len(queue_id_hex)))
     if len(dest_pk_hex) != 66:
-        raise ValueError(f"dest_pk_hex must be 66 hex chars, got {len(dest_pk_hex)}")
+        raise ValueError("dest_pk_hex must be 66 hex chars, got {}".format(len(dest_pk_hex)))
 
     # Duplicate messages may be a bug by the caller.
     if msg_type == MsgEnum.MSG:
@@ -88,8 +93,6 @@ def ordered_ack_send(
         "updated": 0,
         # Created now.
         "created": client.get_time(),
-        # Track rebroadcast count.
-        "amount": 0,
     }
 
     # Caller can await ack if they want.

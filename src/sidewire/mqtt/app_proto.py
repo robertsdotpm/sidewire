@@ -7,6 +7,7 @@ from .utils import get_msg_from_queue
 
 # Function called for new application (type=msg) publishes.
 async def process_app_msg(client: Any, app_packet: Any) -> None:
+    """Deliver a received application message to registered handlers and enqueue an ACK back to the sender."""
     # Using the integer directly from the object.
     seq_no = app_packet.seq_no
     queue_id = app_packet.queue_id_hex
@@ -64,6 +65,7 @@ async def process_app_msg(client: Any, app_packet: Any) -> None:
 # Function called for new application (type=probe) publishes.
 # ACKs the sender so discovery works, but never calls user handlers.
 async def process_app_probe(client: Any, app_packet: Any) -> None:
+    """Respond to a probe packet with an ACK to confirm reachability without invoking user message handlers."""
     # Does message already exist.
     found_msg = get_msg_from_queue(
         client,
@@ -88,8 +90,8 @@ async def process_app_probe(client: Any, app_packet: Any) -> None:
         log_exception()
 
 
-# Function called for new application (type=msgack) publishes.
 def process_app_ack(client: Any, app_packet: Any) -> None:
+    """Resolve the outstanding Future for a message when its application-level ACK arrives."""
     # Pull fields directly from the object
     queue_id = app_packet.queue_id_hex
     seq_no = app_packet.seq_no

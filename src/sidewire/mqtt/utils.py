@@ -6,6 +6,7 @@ from .mqtt_defs import MsgEnum
 
 
 def mqtt_encode_varint(value: int) -> bytes:
+    """Encode an integer as a MQTT variable-length integer (up to 4 bytes)."""
     encoded = bytearray()
     while True:
         byte = value % 128
@@ -20,6 +21,7 @@ def mqtt_encode_varint(value: int) -> bytes:
 
 
 def mqtt_decode_varint(buf: bytes, offset: int) -> Tuple[Optional[int], Optional[int]]:
+    """Decode a MQTT variable-length integer from buf at offset; return (value, bytes_consumed)."""
     multiplier = 1
     value = 0
     consumed = 0
@@ -40,11 +42,13 @@ def mqtt_decode_varint(buf: bytes, offset: int) -> Tuple[Optional[int], Optional
 
 
 def mqtt_enc_str(s: Any) -> bytes:
+    """Encode a string as MQTT UTF-8 encoded string (2-byte length prefix + UTF-8 bytes)."""
     b = to_b(s)
     return struct.pack("!H", len(b)) + b
 
 
 def packet_ack_future(client: Any, packet_type: Any) -> Tuple[bytes, asyncio.Future]:
+    """Allocate a new packet ID and register a Future to be resolved on ACK receipt."""
     packet_id = get_packet_id(client)
     packet_ack = asyncio.Future()
     client.packet_ids[packet_type][packet_id] = packet_ack
@@ -55,6 +59,7 @@ def packet_ack_future(client: Any, packet_type: Any) -> Tuple[bytes, asyncio.Fut
 
 
 def iter_all_messages(msg_queues: Dict) -> Iterator[Dict]:
+    """Yield every queued message across all types, queue IDs, and sequence numbers."""
     # Queues are split by app msg type: MSG or MSGACK.
     for msg_type in msg_queues:
         # Each plugin instance has a unique queue_id.
@@ -69,6 +74,7 @@ def iter_all_messages(msg_queues: Dict) -> Iterator[Dict]:
 
 
 def reset_session_state(client: Any) -> None:
+    """Reset all protocol-level state on the client for a fresh connection."""
     # Clear the stream buffer
     client.buf = b""
 
@@ -91,6 +97,7 @@ def reset_session_state(client: Any) -> None:
 
 
 def get_packet_id(client: Any) -> bytes:
+    """Return the next available 2-byte MQTT packet ID that is not currently in-flight."""
     for _ in range(65535):
         client.packet_id = (client.packet_id % 65535) + 1
         pid = struct.pack(">H", client.packet_id)
@@ -103,10 +110,12 @@ def get_packet_id(client: Any) -> bytes:
 
 
 async def blank_ping_handler(self: Any) -> None:
+    """No-op ping handler used as a default when no ping response processing is needed."""
     pass
 
 
 def prune_msg_ids(client: Any, now: float) -> None:
+    """Remove expired message IDs from the client's sent and received ID tables."""
     ttl = client.republish_duration * 2
     for id_table in (
         client.recv_msg_ids,
@@ -120,6 +129,7 @@ def prune_msg_ids(client: Any, now: float) -> None:
 def get_msg_from_queue(
     client: Any, queue_id_hex: str, seq_no: int, queue_type: Any = MsgEnum.MSGACK
 ) -> Optional[Dict]:
+    """Return the queued message for queue_id_hex/seq_no, or None if not found."""
     queue = client.msg_queues[queue_type]
     if queue_id_hex not in queue:
         return None

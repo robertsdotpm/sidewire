@@ -8,6 +8,7 @@ from .mqtt_proto import handle_mqtt_packet
 async def mqtt_packet_reader(
     client: Any, chunk: bytes, client_tup: Any, pipe: Any
 ) -> None:
+    """Buffer incoming TCP data and dispatch complete MQTT packets to the protocol handler."""
     # Nothing received, end.
     if not chunk:
         return

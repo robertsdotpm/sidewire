@@ -17,7 +17,7 @@ class SmartPipe:
 
     async def connect(self, msg_cb: Optional[Callable] = None) -> "SmartPipe":
         """Discover destination clients via rendezvous hash if not already resolved."""
-        if not len(self.clients):
+        if not self.clients:
             self.clients = await get_dest_clients(
                 self.router.nic,
                 self.dest_pub_hex,

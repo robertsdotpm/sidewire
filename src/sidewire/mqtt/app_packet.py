@@ -46,7 +46,7 @@ class AppPacket:
         """
         if len(self.queue_id_hex) != 64:
             raise ValueError(
-                f"queue_id_hex must be 64 hex chars, got {len(self.queue_id_hex)}"
+                "queue_id_hex must be 64 hex chars, got {}".format(len(self.queue_id_hex))
             )
 
         # Stamp creation time once; retransmissions reuse the same packed bytes

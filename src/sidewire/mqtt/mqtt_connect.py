@@ -17,15 +17,11 @@ from .mqtt_msgs import build_connect
 # Connect to MQTT server, subcribe to our public key hex.
 # Setup stream-based packet reconstruction handler.
 async def mqtt_connect(self: Any, keep_alive: int) -> Any:
+    """Establish a TCP connection to the MQTT broker, perform the CONNECT handshake, and subscribe to the client's public key topic."""
     # Incompatible AF.
     if self.af not in self.nic.supported():
         raise ValueError("NIC does not support address family")
 
-    """
-    In MQTT the client ID determines offline saved message queues.
-    Normally MQTT clients reuse IDs to get offline messages but here since
-    the software manages message delivery itself a rand id ensures a fresh state.
-    """
     # In MQTT the client ID determines offline saved message queues.
     # Normally MQTT clients reuse IDs to get offline messages but here since
     # the software manages message delivery itself a rand id ensures a fresh state.
@@ -60,6 +56,7 @@ async def mqtt_connect(self: Any, keep_alive: int) -> Any:
 
     # Register the packet reader callback
     async def handle_chunks_async(chunk: bytes, client_tup: Any, pipe: Any) -> None:
+        """Forward incoming TCP chunks to the MQTT packet reader for this client."""
         return await mqtt_packet_reader(self, chunk, client_tup, pipe)
 
     # Add handler to read chunks.
@@ -74,6 +71,7 @@ async def mqtt_connect(self: Any, keep_alive: int) -> Any:
 
 # Handles the subscription to the public key topic
 async def subscribe_to_identity(self: Any, pipe: Any) -> None:
+    """Subscribe the client to its own ECDSA public key hex topic and verify the SUBACK."""
     # Convert 33 byte compact pub key to hex.
     pub_hex = to_hs(self.kp.compact_public_key)
 
@@ -94,6 +92,7 @@ async def subscribe_to_identity(self: Any, pipe: Any) -> None:
 
 # Ensure a connection exists before running dispatcher.
 async def reconnect_loop(client: Any, keep_alive: int) -> Optional[bool]:
+    """Continuously attempt to reconnect the client with exponential backoff until a live pipe is established."""
     attempts = 0
     while not client.is_closed.is_set():
         if client.pipe and not client.pipe.on_close.is_set():

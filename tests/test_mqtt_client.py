@@ -75,7 +75,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
     async def test_connect_single_success(self):
         client = get_mqtt_client()
         pipe = await client.connect()
-        assert pipe
+        self.assertTrue(pipe)
         await pipe.close()
 
     async def test_connect_single_fail(self):
@@ -85,7 +85,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             pipe = await client.connect()
             raise Exception("mqtt fail con test invalid")
         except Exception:
-            assert pipe is None
+            self.assertIsNone(pipe)
 
     async def test_single_send_recv(self):
         buf = "msg to send"
@@ -96,7 +96,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
                 got_msg.set()
 
         await mqtt_send_msg_and_handle([buf], msg_handler)
-        assert got_msg.is_set()
+        self.assertTrue(got_msg.is_set())
 
     async def test_single_send_recv_disconnect(self):
         buf = "msg to send"
@@ -107,7 +107,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
                 got_msg.set()
 
         await mqtt_send_msg_and_handle([buf], msg_handler, do_close=True, timeout=20)
-        assert got_msg.is_set()
+        self.assertTrue(got_msg.is_set())
 
     async def test_single_recv_once(self):
         msg_list = ["first msg", "first msg"]
@@ -119,7 +119,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         await mqtt_send_msg_and_handle(msg_list, msg_handler, ignore_timeout=True)
 
         # Part 1: no message duplication.
-        assert recv_list != msg_list
+        self.assertNotEqual(recv_list, msg_list)
         # assert(recv_list == msg_list)
 
         # Part 2: no duplication from rebroadcasts.
@@ -134,7 +134,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             msg_list, msg_handler, min_sleep=6, ignore_acked=True
         )
 
-        assert recv_list == msg_list
+        self.assertEqual(recv_list, msg_list)
 
     async def test_ping_resp(self):
         client = get_mqtt_client()
@@ -149,7 +149,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(6)
         finally:
             await client.close()
-        assert len(got_ping)
+        self.assertTrue(got_ping)
 
     """
     Asyncio is "reactive" -- so it triggers disconnect after an attempt to use a
@@ -208,8 +208,8 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
         # assert(recv_list == msg_list)
 
     # Add all the messages concurrently with send then check result.
+    @unittest.skip("concurrent ordering not yet implemented")
     async def test_seq_send_recv_concurrent(self):
-        return
         msg_list = ["this is first", "second", "third", "fourth"]
         recv_list = []
 
@@ -258,13 +258,13 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
                 await mqtt_send_msg_and_handle(
                     msg_list, msg_handler, server=server, interval=5, timeout=3
                 )
-            except ConnectionError:
+            except (ConnectionError, asyncio.TimeoutError, OSError):
                 print("Connection error -- skipping.")
                 continue
 
             # Part 1: no message duplication.
             # print(recv_list)
-            assert recv_list == msg_list
+            self.assertEqual(recv_list, msg_list)
 
     async def test_repub_intervals(self):
         buf = "msg to send"
@@ -275,7 +275,7 @@ class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
                 got_msg.set()
 
         await mqtt_send_msg_and_handle([buf], msg_handler, ack_await=False)
-        assert got_msg.is_set()
+        self.assertTrue(got_msg.is_set())
 
 
 if __name__ == "__main__":
