@@ -1,11 +1,11 @@
 """
 Given a remote hex pub key: determines a list of MQTT clients that the dest is on.
-It uses a probablistic algorithm based on rendezvous hashing. This approach has
+It uses a probabilistic algorithm based on rendezvous hashing. This approach has
 several benefits:
 
 - Neither side needs to know the others server list
 - Server lists may change, offsets may change, fixed servers may go down
-- Using the public key to yield a server list is adaptive to epemeral server
+- Using the public key to yield a server list is adaptive to ephemeral server
 faults since deterministic ordering eventually may intersect a new server
 - All of this takes place without coordination
 - Easy to adapt to multiple address families

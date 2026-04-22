@@ -1,3 +1,4 @@
+import pytest
 from aionetiface import *
 from sidewire import *
 
@@ -71,6 +72,7 @@ async def mqtt_send_msg_and_handle(
         await client.close()
 
 
+@pytest.mark.network
 class TestMQTTClient(unittest.IsolatedAsyncioTestCase):
     async def test_connect_single_success(self):
         client = get_mqtt_client()

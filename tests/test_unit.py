@@ -80,10 +80,14 @@ class TestMQTTVarint(unittest.TestCase):
     def test_four_byte_max(self):
         self._roundtrip(268435455)  # max representable in 4 bytes
 
-    def test_incomplete_buffer_returns_none(self):
-        value, consumed = mqtt_decode_varint(b"", 0)
-        self.assertIsNone(value)
-        self.assertIsNone(consumed)
+    def test_incomplete_buffer_raises(self):
+        with self.assertRaises(ValueError):
+            mqtt_decode_varint(b"", 0)
+
+    def test_malformed_varint_raises(self):
+        # Four continuation bits in a row is not a valid MQTT varint.
+        with self.assertRaises(ValueError):
+            mqtt_decode_varint(b"\x80\x80\x80\x80", 0)
 
     def test_offset_respected(self):
         buf = b"\x00" + mqtt_encode_varint(42)
@@ -181,8 +185,8 @@ class TestAppPacketRoundTrip(unittest.TestCase):
         client = _make_client_stub()
         pkt = self._make_packet()
         packed = pkt.pack(client)
-        # Corrupt the signature portion (bytes 66-194)
-        tampered = packed[:66] + "x" * 128 + packed[194:]
+        # Corrupt the signature portion (bytes 33-97 in the binary layout).
+        tampered = packed[:33] + (b"\x00" * 64) + packed[97:]
         self.assertIsNone(AppPacket.unpack(tampered))
 
     def test_wrong_public_key_returns_none(self):
@@ -190,9 +194,8 @@ class TestAppPacketRoundTrip(unittest.TestCase):
         client2 = _make_client_stub()  # different keypair
         pkt = self._make_packet()
         packed = pkt.pack(client1)
-        # Replace src_pk_hex with client2's key
-        wrong_pk = to_h(client2.kp.compact_public_key)
-        tampered = wrong_pk + packed[66:]
+        # Replace src_pk bytes with client2's compressed public key.
+        tampered = client2.kp.compact_public_key + packed[33:]
         self.assertIsNone(AppPacket.unpack(tampered))
 
     def test_timestamp_stamped_once(self):
@@ -241,8 +244,8 @@ class TestAppPacketRoundTrip(unittest.TestCase):
         client = _make_client_stub()
         pkt = self._make_packet()
         packed = pkt.pack(client)
-        expected_pk = to_h(client.kp.compact_public_key)
-        self.assertTrue(packed.startswith(expected_pk))
+        self.assertIsInstance(packed, (bytes, bytearray))
+        self.assertTrue(packed.startswith(client.kp.compact_public_key))
 
     def test_restored_src_pk_matches_signer(self):
         client = _make_client_stub()
@@ -260,9 +263,11 @@ class TestAppPacketRoundTrip(unittest.TestCase):
         self.assertEqual(restored.msg, "")
 
     def test_malformed_payload_returns_none(self):
+        self.assertIsNone(AppPacket.unpack(b"notvalid"))
+        self.assertIsNone(AppPacket.unpack(b""))
+        self.assertIsNone(AppPacket.unpack(b"x" * 10))
+        # Non-bytes inputs are rejected as well.
         self.assertIsNone(AppPacket.unpack("notvalid"))
-        self.assertIsNone(AppPacket.unpack(""))
-        self.assertIsNone(AppPacket.unpack("x" * 10))
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +447,117 @@ class TestGetMsgFromQueue(unittest.TestCase):
 
         result = get_msg_from_queue(_Stub(), "q", 1, MsgEnum.MSGACK)
         self.assertEqual(result, "hello")
+
+
+# ---------------------------------------------------------------------------
+# SmartPipe unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestSmartPipeInit(unittest.TestCase):
+    def _make_router_stub(self):
+        class _Router:
+            pass
+        return _Router()
+
+    def test_init_stores_router_and_dest(self):
+        from sidewire.smart_pipe import SmartPipe
+        router = self._make_router_stub()
+        sp = SmartPipe(router, "aabbcc")
+        self.assertIs(sp.router, router)
+        self.assertEqual(sp.dest_pub_hex, "aabbcc")
+
+    def test_init_empty_clients_by_default(self):
+        from sidewire.smart_pipe import SmartPipe
+        sp = SmartPipe(self._make_router_stub(), "aabb")
+        self.assertEqual(sp.clients, [])
+
+    def test_init_accepts_pre_resolved_clients(self):
+        from sidewire.smart_pipe import SmartPipe
+        mock_clients = [object(), object()]
+        sp = SmartPipe(self._make_router_stub(), "aabb", clients=mock_clients)
+        self.assertEqual(sp.clients, mock_clients)
+
+
+class TestSmartPipeSendAllFail(unittest.IsolatedAsyncioTestCase):
+    async def test_send_returns_zero_when_all_tasks_timeout(self):
+        """SmartPipe.send() returns 0 when every client times out."""
+        import asyncio
+        from sidewire.smart_pipe import SmartPipe
+
+        class _FakeClient:
+            def queue_msg(self, msg, dest, msg_id):
+                fut = asyncio.get_event_loop().create_future()
+                return None, fut  # future never resolves → timeout
+
+            def dequeue_msg(self, msg_id):
+                pass
+
+        router = object()
+        sp = SmartPipe(router, "dest_hex", clients=[_FakeClient()])
+        result = await sp.send("hello", timeout=0)
+        self.assertEqual(result, 0)
+
+    async def test_send_returns_message_length_on_success(self):
+        """SmartPipe.send() returns byte length when one client succeeds."""
+        import asyncio
+        from sidewire.smart_pipe import SmartPipe
+
+        class _FakeClient:
+            def queue_msg(self, msg, dest, msg_id):
+                fut = asyncio.get_event_loop().create_future()
+                fut.set_result(True)
+                return None, fut
+
+            def dequeue_msg(self, msg_id):
+                pass
+
+        router = object()
+        sp = SmartPipe(router, "dest_hex", clients=[_FakeClient()])
+        result = await sp.send("hello world", timeout=5)
+        self.assertEqual(result, len("hello world"))
+
+
+# ---------------------------------------------------------------------------
+# Router cache_clients tests
+# ---------------------------------------------------------------------------
+
+
+class TestRouterCacheClients(unittest.TestCase):
+    def _make_minimal_router(self):
+        """Build a Router without network connections by bypassing __init__."""
+        import time
+        from sidewire.router import Router
+        router = object.__new__(Router)
+        router.cache = {}
+        router.get_time = time.time
+        return router
+
+    def test_cache_clients_stores_entry(self):
+        from sidewire.router import Router
+        router = self._make_minimal_router()
+        clients = [object()]
+        router.cache_clients("pubkey_hex", clients)
+        self.assertIn("pubkey_hex", router.cache)
+        self.assertIs(router.cache["pubkey_hex"]["clients"], clients)
+
+    def test_cache_clients_updates_timestamp(self):
+        import time
+        router = self._make_minimal_router()
+        before = time.time()
+        router.cache_clients("pubkey_hex", [])
+        after = time.time()
+        t = router.cache["pubkey_hex"]["updated"]
+        self.assertGreaterEqual(t, before)
+        self.assertLessEqual(t, after)
+
+    def test_cache_clients_overwrites_old_entry(self):
+        router = self._make_minimal_router()
+        first = [object()]
+        second = [object()]
+        router.cache_clients("key", first)
+        router.cache_clients("key", second)
+        self.assertIs(router.cache["key"]["clients"], second)
 
 
 if __name__ == "__main__":

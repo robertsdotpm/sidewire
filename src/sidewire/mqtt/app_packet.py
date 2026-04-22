@@ -1,6 +1,35 @@
+import struct
 from typing import Any, Optional
 from ecdsa import VerifyingKey, SECP256k1, util, BadSignatureError, MalformedPointError
-from aionetiface import h_to_b, to_b, to_h
+from aionetiface import h_to_b, to_b, to_h, to_s
+
+
+# Fixed binary sizes (bytes) for AppPacket wire format.
+# src_pk: 33 bytes (compressed SECP256k1 key)
+# sig:    64 bytes (fixed-width ECDSA signature)
+# queue_id: 32 bytes (sha256 digest)
+# seq_no: 4 bytes big-endian unsigned
+# timestamp: 8 bytes big-endian unsigned
+# msg_type: 1 byte unsigned
+# msg: remaining bytes (length implicit from buffer)
+SRC_PK_LEN = 33
+SIG_LEN = 64
+QUEUE_ID_LEN = 32
+SEQ_NO_LEN = 4
+TIMESTAMP_LEN = 8
+MSG_TYPE_LEN = 1
+
+# Offsets within the packed wire buffer.
+SIG_OFFSET = SRC_PK_LEN
+SIGNED_MSG_OFFSET = SRC_PK_LEN + SIG_LEN
+QUEUE_ID_OFFSET = 0
+SEQ_NO_OFFSET = QUEUE_ID_OFFSET + QUEUE_ID_LEN
+TIMESTAMP_OFFSET = SEQ_NO_OFFSET + SEQ_NO_LEN
+MSG_TYPE_OFFSET = TIMESTAMP_OFFSET + TIMESTAMP_LEN
+MSG_OFFSET = MSG_TYPE_OFFSET + MSG_TYPE_LEN
+
+# Minimum valid packet size: src_pk + sig + queue_id + seq_no + timestamp + msg_type.
+MIN_PACKET_LEN = SIGNED_MSG_OFFSET + MSG_OFFSET
 
 
 class AppPacket:
@@ -39,11 +68,8 @@ class AppPacket:
             return None
         return "{:016x}".format(self.timestamp)
 
-    def pack(self, client: Any) -> str:
-        """
-        Equivalent to the packing logic in ordered_ack_send.
-        Constructs the full hex string to be sent over the wire.
-        """
+    def pack(self, client: Any) -> bytes:
+        """Serialize the signed packet to bytes using fixed-width binary framing."""
         if len(self.queue_id_hex) != 64:
             raise ValueError(
                 "queue_id_hex must be 64 hex chars, got {}".format(len(self.queue_id_hex))
@@ -54,77 +80,64 @@ class AppPacket:
         if self.timestamp is None:
             self.timestamp = int(client.get_time())
 
-        # Prepend application-level header to message portion.
-        # msg_type is converted to hex (2 chars)
-        type_as_bytes = bytes([self.msg_type])
-        type_hex = to_h(type_as_bytes)
-        headered_msg = type_hex + self.msg
+        queue_id_bytes = h_to_b(self.queue_id_hex)
+        msg_bytes = to_b(self.msg) if self.msg else b""
 
-        # Signed message section: queue_id(64) + seq(8) + timestamp(16) + type+msg
+        # Signed section: queue_id(32) + seq_no(4) + timestamp(8) + msg_type(1) + msg.
         signed_msg = (
-            self.queue_id_hex + self.seq_no_hex + self.timestamp_hex + headered_msg
+            queue_id_bytes
+            + struct.pack("!I", self.seq_no)
+            + struct.pack("!Q", self.timestamp)
+            + struct.pack("!B", self.msg_type)
+            + msg_bytes
         )
 
-        # Sign the binary representation of the hex string
-        signed_msg_bytes = to_b(signed_msg)
-        sig = client.kp.private_key.sign(
-            signed_msg_bytes, sigencode=util.sigencode_string
-        )
-
+        # Sign the binary representation.
+        sig = client.kp.private_key.sign(signed_msg, sigencode=util.sigencode_string)
         self.sig_hex = to_h(sig)
         compact_pk = client.kp.compact_public_key
         self.src_pk_hex = to_h(compact_pk)
 
-        # Full proto message to send.
-        # Layout: src_pk(66) + sig(128) + queue_id(64) + seq(8) + timestamp(16) + headered_msg
-        out = self.src_pk_hex + self.sig_hex + signed_msg
-        return out
+        # Full wire layout: src_pk(33) + sig(64) + signed_msg.
+        return compact_pk + sig + signed_msg
 
     @classmethod
-    def unpack(cls, payload: str) -> Optional["AppPacket"]:
-        """
-        Equivalent to the parsing logic in handle_publish.
-        Validates signatures and returns an instance of AppPacket.
-        """
-        # Layout: [src_pk(66)][sig(128)][signed_data...]
+    def unpack(cls, payload: bytes) -> Optional["AppPacket"]:
+        """Parse and verify a packed AppPacket wire buffer, returning None on any error."""
+        if not isinstance(payload, (bytes, bytearray)):
+            return None
+        if len(payload) < MIN_PACKET_LEN:
+            return None
+
         try:
-            src_pk_hex = payload[:66]
-            sig_hex = payload[66:194]
-            sig_bytes = h_to_b(sig_hex)
-            signed_msg_hex = payload[194:]
-            signed_msg_bytes = to_b(signed_msg_hex)
+            src_pk_bytes = bytes(payload[:SRC_PK_LEN])
+            sig_bytes = bytes(payload[SIG_OFFSET:SIGNED_MSG_OFFSET])
+            signed_msg = bytes(payload[SIGNED_MSG_OFFSET:])
 
-            # Verify ECDSA Signature
-            vk_bytes = h_to_b(src_pk_hex)
-            vk = VerifyingKey.from_string(vk_bytes, curve=SECP256k1)
-
-            vk.verify(sig_bytes, signed_msg_bytes, sigdecode=util.sigdecode_string)
+            # Verify ECDSA signature.
+            vk = VerifyingKey.from_string(src_pk_bytes, curve=SECP256k1)
+            vk.verify(sig_bytes, signed_msg, sigdecode=util.sigdecode_string)
         except (BadSignatureError, MalformedPointError, ValueError):
             # Common failure point if keys or signatures are malformed.
             return None
 
-        # Route to Application Logic
-        # msg_data Layout: [queue_id(64)][seq(8)][timestamp(16)][type(2)][msg...]
-        queue_id_hex = signed_msg_hex[:64]
-        seq_no_hex = signed_msg_hex[64:72]
-        timestamp_hex = signed_msg_hex[72:88]
-        app_payload = signed_msg_hex[88:]
+        # Parse the signed section.
+        queue_id_bytes = signed_msg[QUEUE_ID_OFFSET:QUEUE_ID_OFFSET + QUEUE_ID_LEN]
+        seq_no_bytes = signed_msg[SEQ_NO_OFFSET:SEQ_NO_OFFSET + SEQ_NO_LEN]
+        timestamp_bytes = signed_msg[TIMESTAMP_OFFSET:TIMESTAMP_OFFSET + TIMESTAMP_LEN]
+        msg_type_byte = signed_msg[MSG_TYPE_OFFSET:MSG_TYPE_OFFSET + MSG_TYPE_LEN]
+        msg_bytes = signed_msg[MSG_OFFSET:]
 
-        # Extract message type and actual content
-        msg_type_hex = app_payload[:2]
-        msg_type_bytes = h_to_b(msg_type_hex)
-        msg_type = msg_type_bytes[0]
-        actual_msg = app_payload[2:]
+        seq_no = struct.unpack("!I", seq_no_bytes)[0]
+        timestamp = struct.unpack("!Q", timestamp_bytes)[0]
+        msg_type = struct.unpack("!B", msg_type_byte)[0]
 
-        # Convert hex fields back to integers
-        seq_no_int = int(seq_no_hex, 16)
-        timestamp_int = int(timestamp_hex, 16)
         return cls(
-            src_pk_hex=src_pk_hex,
-            sig_hex=sig_hex,
-            queue_id_hex=queue_id_hex,
-            seq_no=seq_no_int,
-            timestamp=timestamp_int,
+            src_pk_hex=to_h(src_pk_bytes),
+            sig_hex=to_h(sig_bytes),
+            queue_id_hex=to_h(queue_id_bytes),
+            seq_no=seq_no,
+            timestamp=timestamp,
             msg_type=msg_type,
-            msg=actual_msg,
+            msg=to_s(msg_bytes),
         )

@@ -26,7 +26,7 @@ def build_subscribe(topic: str, packet_id: bytes) -> bytes:
 
 
 def build_publish(
-    topic: str, payload: str, packet_id: bytes, dup: bool = False
+    topic: str, payload: bytes, packet_id: bytes, dup: bool = False
 ) -> bytes:
     """Build a MQTT PUBLISH packet at QoS 1, optionally with the DUP flag set."""
     topic_bytes = mqtt_enc_str(topic)

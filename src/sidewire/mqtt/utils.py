@@ -20,15 +20,20 @@ def mqtt_encode_varint(value: int) -> bytes:
     return bytes(encoded)
 
 
-def mqtt_decode_varint(buf: bytes, offset: int) -> Tuple[Optional[int], Optional[int]]:
-    """Decode a MQTT variable-length integer from buf at offset; return (value, bytes_consumed)."""
+def mqtt_decode_varint(buf: bytes, offset: int) -> Tuple[int, int]:
+    """Decode a MQTT variable-length integer from buf at offset.
+
+    Returns (value, bytes_consumed). Raises ValueError("buffer too short")
+    if the buffer truncates before the terminator bit is seen, and
+    ValueError("malformed varint") if the 4-byte limit is exceeded.
+    """
     multiplier = 1
     value = 0
     consumed = 0
 
     for i in range(4):  # max 4 bytes
         if offset + i >= len(buf):
-            return None, None
+            raise ValueError("buffer too short")
 
         byte = buf[offset + i]
         consumed += 1
@@ -38,7 +43,7 @@ def mqtt_decode_varint(buf: bytes, offset: int) -> Tuple[Optional[int], Optional
 
         multiplier *= 128
 
-    raise ValueError("Malformed Remaining Length")
+    raise ValueError("malformed varint")
 
 
 def mqtt_enc_str(s: Any) -> bytes:

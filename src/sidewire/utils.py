@@ -1,4 +1,3 @@
-import copy
 import asyncio
 from typing import Any, Dict, List, Optional
 from aionetiface import (
@@ -45,8 +44,10 @@ def rendezvous_hash(nic: Any, pub_key_hex: str, servers: Dict) -> List[Dict]:
     for af in nic.supported():
         af_buckets[af] = []
         for host in servers[af]:
-            # Record server to score.
-            server = copy.deepcopy(servers[af][host])
+            # Shallow copy is sufficient: we only mutate the top-level dict by
+            # adding a "score" key, and nested values (host, port, fqns) are
+            # never written back into the original infra table.
+            server = dict(servers[af][host])
 
             # Record score for server using the split-out scoring function.
             server["score"] = get_server_score(af, host, pub_key_hex)

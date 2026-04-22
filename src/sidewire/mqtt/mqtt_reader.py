@@ -23,8 +23,11 @@ async def mqtt_packet_reader(
             return
 
         # Decode remaining length (starts at byte 1).
-        rem_len, consumed = mqtt_decode_varint(client.buf, 1)
-        if rem_len is None:
+        try:
+            rem_len, consumed = mqtt_decode_varint(client.buf, 1)
+        except ValueError:
+            # Either the varint is truncated (wait for more data) or malformed;
+            # either way we can't make progress on this buffer state.
             return
 
         # Total packet size = fixed header (1) + varint + payload.

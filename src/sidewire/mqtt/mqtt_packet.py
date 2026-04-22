@@ -38,9 +38,6 @@ class MQTTPacket:
 
         return fixed + body
 
-    def debug_print(self) -> None:
-        """Print packet debug info (no-op placeholder)."""
-
 
 def mqtt_parse_packet(raw: bytes) -> "MQTTPacket":
     """Parse raw bytes into an MQTTPacket, leaving the body unparsed."""
@@ -93,7 +90,7 @@ def mqtt_parse_puback(packet: "MQTTPacket") -> Optional[bytes]:
 
 def mqtt_parse_publish(
     packet: "MQTTPacket",
-) -> Optional[Tuple[str, str, Optional[bytes]]]:
+) -> Optional[Tuple[str, bytes, Optional[bytes]]]:
     """Parse a PUBLISH packet body into (topic, payload, packet_id); returns None on malformed input."""
     body = packet.body
     offset = 0
@@ -125,8 +122,8 @@ def mqtt_parse_publish(
         packet_id = body[offset : offset + 2]
         offset += 2
 
-    # Payload (everything remaining)
-    payload = to_s(body[offset:])
+    # Payload (remaining raw bytes — caller handles framing).
+    payload = bytes(body[offset:])
     return topic, payload, packet_id
 
 

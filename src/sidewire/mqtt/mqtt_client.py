@@ -7,7 +7,7 @@ generic like a regular MQTT client. Instead it supports:
     are sent back to originating pub key hex channel
     - reliable delivery -- application level acks allow message delivery to be
     confirmed before moving to next message
-    - sequential messaging -- sequential messaging queues allow for culmulative
+    - sequential messaging -- sequential messaging queues allow for cumulative
     ack to keep ack spam to a minimum. Asyncio still sequences sends without
     the need to use a specific message queue so this is optional.
 
@@ -18,7 +18,7 @@ Technical notes:
     - no reused packet IDs for publish messages
     - delivery and ordering handled by application-level ack
 
-Using the above settings means that message retransmittion is no longer managed
+Using the above settings means that message retransmission is no longer managed
 by the server and ends up entirely managed by the client. The MQTT server becomes
 a simple proxy in such a mode. But you can build a more reliable, deterministic,
 system on top of it without hidden edge-cases that might exist (e.g. storage
@@ -238,13 +238,13 @@ class MQTTClient:
     # Internal: used to publish signed messages to pub key hashed topics.
     # Returns packet and future to await ack for the packet from the server.
     def publish(
-        self, topic: str, payload: str, dup: bool = False
+        self, topic: str, payload: bytes, dup: bool = False
     ) -> Tuple[bytes, asyncio.Future]:
         """Build a PUBLISH packet and return it with a future for the broker PUBACK."""
         if not is_ascii(topic):
             raise ValueError("topic must be ASCII")
-        if not is_ascii(payload):
-            raise ValueError("payload must be ASCII")
+        if not isinstance(payload, (bytes, bytearray)):
+            raise TypeError("payload must be bytes, got {}".format(type(payload).__name__))
         packet_id, packet_ack = packet_ack_future(self, MQTTEnum.PUBACK)
         buf = build_publish(topic, payload, packet_id, dup)
         return buf, packet_ack
@@ -286,7 +286,13 @@ class MQTTClient:
         return False
 
     async def ping_handler(self) -> None:
-        """Handle a PINGRESP from the server (no-op by default)."""
+        """Handle a PINGRESP from the server.
+
+        MQTT keepalive is confirmed purely by receipt of the PINGRESP, so
+        the default behaviour is intentionally a no-op. Tests override this
+        method to observe that pings are flowing.
+        """
+        return
 
 
 async def demo_mqtt() -> None:
