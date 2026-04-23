@@ -27,3 +27,11 @@ Never remove or comment out `print()` calls. They are intentional debugging and 
 - Use `AssertionError` (or bare `assert`) for internal invariants that should never be false.
 - Do not use `RuntimeError` as a catch-all for invariant violations.
 - Pick one error idiom per function: either return a sentinel value or raise — not both.
+
+## Running tests
+
+Use Python 3.5 from pyenv to run the test suite so breakage on the minimum supported version is caught immediately:
+
+```sh
+~/.pyenv/versions/3.5.10/bin/python -m pytest tests/ -q
+```
