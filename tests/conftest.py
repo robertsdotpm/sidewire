@@ -1,6 +1,24 @@
-"""Backport unittest.IsolatedAsyncioTestCase for Python < 3.8."""
+"""Backport unittest.IsolatedAsyncioTestCase for Python < 3.8.
+
+Also installs ProactorEventLoop on Windows + Python 3.7 to avoid WinError 10038
+(SelectSelector retains closed socket fds after disconnect).
+ProactorEventLoop became the default on Windows in Python 3.8; on 3.7 it must
+be set explicitly.
+"""
 import asyncio
+import sys
 import unittest
+
+if sys.platform == "win32" and sys.version_info < (3, 8):
+    if hasattr(asyncio, "WindowsProactorEventLoopPolicy"):
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+
+def _get_pending_tasks(loop):
+    """Return pending tasks for loop, compatible with Python 3.5+."""
+    if sys.version_info >= (3, 7):
+        return asyncio.all_tasks(loop)
+    return asyncio.Task.all_tasks(loop)
 
 
 if not hasattr(unittest, "IsolatedAsyncioTestCase"):
@@ -14,7 +32,7 @@ if not hasattr(unittest, "IsolatedAsyncioTestCase"):
                 return loop.run_until_complete(coro)
             finally:
                 try:
-                    pending = asyncio.all_tasks(loop)
+                    pending = _get_pending_tasks(loop)
                     for t in pending:
                         t.cancel()
                     if pending:

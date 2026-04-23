@@ -31,7 +31,7 @@ code otherwise it blocks the whole program for servers it already knows are down
 
 import time
 from typing import Any, Callable, Dict, List, Optional
-from aionetiface import IP4, IP6, Interface, Signing, async_run
+from aionetiface import IP4, IP6, Interface
 from .mqtt import MQTTClient
 from .smart_pipe import SmartPipe
 from .utils import get_dest_clients, get_mqtt_server_list
@@ -54,7 +54,6 @@ class Router:
         self.get_time = get_time
         self.nic = nic or Interface("default")
 
-        # Build list of MQTT clients from server list.
         self.clients = {IP4: {}, IP6: {}}
         self.recv_msg_ids = {}
         for af in (IP4, IP6):
@@ -70,13 +69,11 @@ class Router:
                 if msg_handler:
                     self.clients[af][host].add_msg_handler(msg_handler)
 
-                # Make all clients share the same recv_msg_ids queue.
+                # All clients share recv_msg_ids so duplicate detection works across them.
                 self.clients[af][host].recv_msg_ids = self.recv_msg_ids
 
-                # Don't reconnect too frequently if server was down last.
                 self.clients[af][host].last_connect = None
 
-        # Pub key hex -> {"updated", "clients"}
         self.cache = {}
 
     def add_msg_handler(self, msg_handler: Callable) -> None:
@@ -85,18 +82,15 @@ class Router:
             for host in self.clients[af]:
                 self.clients[af][host].add_msg_handler(msg_handler)
 
-    # Same function reusable by both sides.
     async def start(self) -> List[Any]:
         """Connect to the best MQTT servers for this node's own public key."""
         clients = await get_dest_clients(
             self.nic, self.kp.public_key_hex, self.servers, self.clients
         )
 
-        # Cache own pub key -> clients mapping.
         self.cache_clients(self.kp.public_key_hex, clients)
         return clients
 
-    # Smart pipe intelligently routes over a set of MQTT clients.
     async def pipe(
         self, dest_pub_hex: str, use_cache: bool = False, expiry: int = 3600
     ) -> SmartPipe:
@@ -104,19 +98,14 @@ class Router:
         now = self.get_time()
         cached_clients = None  # type: Optional[List[Any]]
 
-        # Attempt to retrieve from cache
         if use_cache and dest_pub_hex in self.cache:
             entry = self.cache[dest_pub_hex]
             if (now - entry["updated"]) < expiry:
                 cached_clients = entry["clients"]
 
-        # If we have cached_clients, we pass them in to skip discovery
         smart_pipe = SmartPipe(self, dest_pub_hex, clients=cached_clients)
-
-        # Connect (this performs rendezvous discovery ONLY if clients is None)
         await smart_pipe.connect()
 
-        # Update cache if we performed a fresh discovery or need to refresh
         if use_cache and cached_clients is None:
             self.cache_clients(dest_pub_hex, smart_pipe.clients)
 
@@ -144,32 +133,3 @@ class Router:
         await self.close()
         return False
 
-
-async def workspace() -> None:
-    """Run an end-to-end smoke test that connects a Router and sends a message to itself."""
-    nic = Interface("default")
-    servers = get_mqtt_server_list()
-    kp = Signing.keypair()
-
-    async def msg_handler(
-        msg: str, src_pk_hex: str, pipe_id_hex: str, client: Any
-    ) -> None:
-        """Print received messages to stdout for workspace debugging."""
-        print("got ", msg, " from ", src_pk_hex)
-
-    router = Router(kp, msg_handler=msg_handler, nic=nic, servers=servers)
-    try:
-        out = await router.start()
-        print("our own clients", out)
-
-        # Already seen this client so shouldn't need to msg for liveliness.
-        pipe = await router.pipe(router.kp.public_key_hex, use_cache=True)
-        await pipe.send("hello world")
-    finally:
-        await router.close()
-
-
-# TODO: dangling resource in the mqtt ping test code.
-
-if __name__ == "__main__":
-    async_run(workspace())

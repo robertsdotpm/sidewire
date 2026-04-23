@@ -24,9 +24,7 @@ def interleave_buckets(af_buckets: Dict) -> List[Dict]:
     Interleaves the results to guarantee diversity in the top N.
     This ensures IPv4 and IPv6 servers both appear at the start of the list.
     """
-    # Max len calculation.
-    max_lengths = [len(bucket) for bucket in af_buckets.values()]
-    max_len = max(max_lengths) if max_lengths else 0
+    max_len = max((len(bucket) for bucket in af_buckets.values()), default=0)
     process_list = []
     for i in range(max_len):
         # Sorted keys for consistency across nodes
@@ -104,9 +102,16 @@ async def get_dest_clients(
     """Discover and return up to n MQTT clients that can reach the destination public key."""
     candidate_clients = []
     sorted_servers = rendezvous_hash(nic, dest_pub_hex, servers)
+    # server["af"] is the IANA protocol number from the INFRA database (always 10
+    # for IPv6, 2 for IPv4). clients_map is keyed by the platform's socket.AF_*
+    # constants, which differ on Windows (AF_INET6 = 23) vs Linux (AF_INET6 = 10).
+    # Normalise via a lookup table so the key matches on all platforms.
+    iana_to_af = {int(IP4): IP4, 10: IP6}
     for server in sorted_servers:
-        af = server["af"]
+        af = iana_to_af.get(int(server["af"]), int(server["af"]))
         host = server["host"]
+        if af not in clients_map or host not in clients_map[af]:
+            continue
         client = clients_map[af][host]
         candidate_clients.append(client)
 
@@ -141,7 +146,7 @@ def get_mqtt_server_list(from_infra: Any = INFRA["MQTT"]) -> Dict:
     for af_txt, af in af_map.items():
         for server_list in from_infra[af_txt]["UDP"]:
             hosts = sorted(server_list[0]["fqns"])
-            if len(hosts):
+            if hosts:
                 host = hosts[0]
             else:
                 host = server_list[0]["ip"]

@@ -35,7 +35,6 @@ class SmartPipe:
         """Send a message to the destination, returning the byte length on success or 0 on failure."""
         msg_id_hex = to_h(rand_b(32))
 
-        # Create all tasks upfront
         tasks = []
         for client in self.clients:
             _, ack_msg = client.queue_msg(msg, self.dest_pub_hex, msg_id_hex)
@@ -52,14 +51,11 @@ class SmartPipe:
 
                 for task in done:
                     try:
-                        # Await result (will raise if failed)
                         await task
 
-                        # Success: cancel everything else immediately
                         for p in pending:
                             p.cancel()
 
-                        # Optional: wait for cancellations to settle
                         await asyncio.gather(*pending, return_exceptions=True)
 
                         return len(msg)
@@ -69,18 +65,15 @@ class SmartPipe:
                     except (OSError, ConnectionError):
                         log_exception()
 
-                # Continue only with remaining tasks
                 tasks = list(pending)
 
         finally:
-            # Ensure all tasks are cleaned up
             for task in tasks:
                 if not task.done():
                     task.cancel()
 
             await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Remove queued messages from all clients
             for client in self.clients:
                 client.dequeue_msg(msg_id_hex)
 
