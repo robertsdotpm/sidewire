@@ -487,7 +487,8 @@ class TestSmartPipeSendAllFail(unittest.IsolatedAsyncioTestCase):
 
         class _FakeClient:
             def queue_msg(self, msg, dest, msg_id):
-                fut = asyncio.get_event_loop().create_future()
+                loop = asyncio.get_event_loop()
+                fut = asyncio.Future(loop=loop)
                 return None, fut  # future never resolves → timeout
 
             def dequeue_msg(self, msg_id):
@@ -505,7 +506,8 @@ class TestSmartPipeSendAllFail(unittest.IsolatedAsyncioTestCase):
 
         class _FakeClient:
             def queue_msg(self, msg, dest, msg_id):
-                fut = asyncio.get_event_loop().create_future()
+                loop = asyncio.get_event_loop()
+                fut = asyncio.Future(loop=loop)
                 fut.set_result(True)
                 return None, fut
 
