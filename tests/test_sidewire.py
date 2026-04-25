@@ -4,7 +4,7 @@ from aionetiface import *
 MQTT_SERVER = ("ovh1.p2pd.net", 1883)
 
 
-class TestSignaling(unittest.IsolatedAsyncioTestCase):
+class TestSignaling(AsyncTestCase):
     async def test_something(self):
         # nic = await Interface()
         # print(nic)

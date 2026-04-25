@@ -479,7 +479,7 @@ class TestSmartPipeInit(unittest.TestCase):
         self.assertEqual(sp.clients, mock_clients)
 
 
-class TestSmartPipeSendAllFail(unittest.IsolatedAsyncioTestCase):
+class TestSmartPipeSendAllFail(AsyncTestCase):
     async def test_send_returns_zero_when_all_tasks_timeout(self):
         """SmartPipe.send() returns 0 when every client times out."""
         import asyncio
