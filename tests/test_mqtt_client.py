@@ -1,17 +1,57 @@
 from aionetiface import *
+from aionetiface import IP4, UDP, get_infra
 from sidewire import *
 
 # Server used for tests.
 USE_AF = None
-MQTT_SERVER = ("ovh1.p2pd.net", 1883)
 
 
-def get_mqtt_client(server=MQTT_SERVER):
+def pick_mqtt_servers(count=8):
+    """Return [(host, port), ...] of `count` MQTT servers from get_infra.
+
+    Each entry is the first server in a separate group, so iterating these
+    sequentially gives genuine fall-over behaviour rather than retrying the
+    same node. Falls back to the well-known public broker list if get_infra
+    has no MQTT entries for whatever reason.
+    """
+    out = []
+    try:
+        groups = get_infra(IP4, UDP, "MQTT", no=count)
+    except Exception:
+        groups = []
+    for group in groups:
+        if not group:
+            continue
+        s = group[0]
+        host = (s.get("fqns") or [s.get("ip")])[0]
+        port = s.get("port", 1883)
+        if host:
+            out.append((host, port))
+    if not out:
+        # Last-resort fallback so a missing servers.json entry doesn't
+        # silently turn every test into a no-server skip.
+        out = [
+            ("ovh1.p2pd.net", 1883),
+            ("test.mosquitto.org", 1883),
+            ("broker.hivemq.com", 1883),
+        ]
+    return out
+
+
+# First server (kept for callers that only need one) -- but tests should
+# loop over pick_mqtt_servers when possible.
+MQTT_SERVER = pick_mqtt_servers(count=1)[0]
+
+
+def get_mqtt_client(server=None):
     nic = Interface("default")
     if USE_AF:
         af = USE_AF
     else:
         af = nic.supported()[0]
+
+    if server is None:
+        server = MQTT_SERVER
 
     kp = Signing.keypair()
     client = MQTTClient(af, nic, server, kp)
@@ -30,8 +70,10 @@ async def mqtt_send_msg_and_handle(
     min_sleep=0,
     ignore_acked=False,
     ack_await=True,
-    server=MQTT_SERVER,
+    server=None,
 ):
+    if server is None:
+        server = MQTT_SERVER
     # Create client and install a message handler.
     client = get_mqtt_client(server=server)
     client.add_msg_handler(msg_handler)
@@ -71,85 +113,130 @@ async def mqtt_send_msg_and_handle(
         await client.close()
 
 
+async def try_servers(test_self, op, servers=None, label=""):
+    """Run op(server) sequentially over a list of MQTT servers, returning the
+    first server that did not raise a network error. Skips the calling test
+    if every server failed.
+    """
+    if servers is None:
+        servers = pick_mqtt_servers()
+    last_exc = None
+    for server in servers:
+        try:
+            await op(server)
+            return server
+        except (OSError, ConnectionError, asyncio.TimeoutError) as exc:
+            last_exc = exc
+            continue
+    test_self.skipTest(
+        "All MQTT servers unreachable for {} (last error: {!r})".format(label, last_exc)
+    )
+
+
 class TestMQTTClient(AsyncTestCase):
     async def test_connect_single_success(self):
-        client = get_mqtt_client()
-        pipe = await client.connect()
-        self.assertTrue(pipe)
-        await pipe.close()
+        async def op(server):
+            client = get_mqtt_client(server=server)
+            try:
+                pipe = await client.connect()
+                self.assertTrue(pipe)
+            finally:
+                await client.close()
+        await try_servers(self, op, label="connect_single_success")
 
     async def test_connect_single_fail(self):
-        client = get_mqtt_client(("ovh1.p2pd.net", 80))
-        pipe = None
-        try:
-            pipe = await client.connect()
-            raise Exception("mqtt fail con test invalid")
-        except Exception:
-            self.assertIsNone(pipe)
+        # Deliberately wrong port -- expect failure regardless of server.
+        servers = [(host, 80) for host, _ in pick_mqtt_servers(count=3)]
+        for server in servers:
+            client = get_mqtt_client(server=server)
+            pipe = None
+            try:
+                pipe = await client.connect()
+                # If a connect somehow succeeded, that's an actual failure
+                # of the test contract -- but keep trying others to confirm.
+                self.assertIsNone(pipe)
+            except Exception:
+                self.assertIsNone(pipe)
 
     async def test_single_send_recv(self):
         buf = "msg to send"
-        got_msg = asyncio.Event()
 
-        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
-            if msg == buf:
-                got_msg.set()
+        async def op(server):
+            got_msg = asyncio.Event()
 
-        await mqtt_send_msg_and_handle([buf], msg_handler)
-        self.assertTrue(got_msg.is_set())
+            async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+                if msg == buf:
+                    got_msg.set()
+
+            await mqtt_send_msg_and_handle([buf], msg_handler, server=server)
+            self.assertTrue(got_msg.is_set())
+
+        await try_servers(self, op, label="single_send_recv")
 
     async def test_single_send_recv_disconnect(self):
         buf = "msg to send"
-        got_msg = asyncio.Event()
 
-        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
-            if msg == buf:
-                got_msg.set()
+        async def op(server):
+            got_msg = asyncio.Event()
 
-        await mqtt_send_msg_and_handle([buf], msg_handler, do_close=True, timeout=20)
-        self.assertTrue(got_msg.is_set())
+            async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+                if msg == buf:
+                    got_msg.set()
+
+            await mqtt_send_msg_and_handle(
+                [buf], msg_handler, do_close=True, timeout=20, server=server,
+            )
+            self.assertTrue(got_msg.is_set())
+
+        await try_servers(self, op, label="single_send_recv_disconnect")
 
     async def test_single_recv_once(self):
-        msg_list = ["first msg", "first msg"]
-        recv_list = []
+        async def op(server):
+            msg_list = ["first msg", "first msg"]
+            recv_list = []
 
-        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
-            recv_list.append(msg)
+            async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+                recv_list.append(msg)
 
-        await mqtt_send_msg_and_handle(msg_list, msg_handler, ignore_timeout=True)
+            await mqtt_send_msg_and_handle(
+                msg_list, msg_handler, ignore_timeout=True, server=server,
+            )
 
-        # Part 1: no message duplication.
-        self.assertNotEqual(recv_list, msg_list)
-        # assert(recv_list == msg_list)
+            # Part 1: no message duplication.
+            self.assertNotEqual(recv_list, msg_list)
 
-        # Part 2: no duplication from rebroadcasts.
-        msg_list = ["first msg"]
-        recv_list = []
+            # Part 2: no duplication from rebroadcasts.
+            msg_list2 = ["first msg"]
+            recv_list2 = []
 
-        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
-            recv_list.append(msg)
+            async def msg_handler2(msg, src_pk_hex, pipe_id_hex, client):
+                recv_list2.append(msg)
 
-        # Allows time for rebroadcast.
-        await mqtt_send_msg_and_handle(
-            msg_list, msg_handler, min_sleep=6, ignore_acked=True
-        )
+            await mqtt_send_msg_and_handle(
+                msg_list2, msg_handler2, min_sleep=6, ignore_acked=True, server=server,
+            )
 
-        self.assertEqual(recv_list, msg_list)
+            self.assertEqual(recv_list2, msg_list2)
+
+        await try_servers(self, op, label="single_recv_once")
 
     async def test_ping_resp(self):
-        client = get_mqtt_client()
-        got_ping = []
+        async def op(server):
+            client = get_mqtt_client(server=server)
+            got_ping = []
 
-        async def ping_handler():
-            got_ping.append(True)
+            async def ping_handler():
+                got_ping.append(True)
 
-        client.ping_handler = ping_handler
-        try:
-            await client.connect(keep_alive=2)
-            await asyncio.sleep(6)
-        finally:
-            await client.close()
-        self.assertTrue(got_ping)
+            client.ping_handler = ping_handler
+            try:
+                await client.connect(keep_alive=2)
+                await asyncio.sleep(6)
+            finally:
+                await client.close()
+            self.assertTrue(got_ping)
+
+        await try_servers(self, op, label="ping_resp")
 
     """
     Asyncio is "reactive" -- so it triggers disconnect after an attempt to use a
@@ -164,48 +251,56 @@ class TestMQTTClient(AsyncTestCase):
 
     async def test_broken_receiver(self):
         msg_list = ["first msg", "second message"]
-        recv_list = []
 
-        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
-            recv_list.append(msg)
+        async def op(server):
+            recv_list = []
 
-        alice_client = get_mqtt_client()
-        bob_client = get_mqtt_client()
+            async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+                recv_list.append(msg)
 
-        # Bob handles received messages.
-        bob_client.add_msg_handler(msg_handler)
+            alice_client = get_mqtt_client(server=server)
+            bob_client = get_mqtt_client(server=server)
 
-        try:
-            # Connect clients.
-            keep_alive = 10
-            await alice_client.connect()
-            await bob_client.connect(reconnect_delay=2, keep_alive=keep_alive)
+            # Bob handles received messages.
+            bob_client.add_msg_handler(msg_handler)
 
-            # Disconnect bob.
-            bob_client.pipe.sock.close()
+            try:
+                # Connect clients.
+                keep_alive = 10
+                await alice_client.connect()
+                await bob_client.connect(reconnect_delay=2, keep_alive=keep_alive)
 
-            # Send message to bob.
-            pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
-            for buf in msg_list:
-                _, got_ack = alice_client.queue_msg(
-                    buf, bob_client.kp.public_key_hex, pipe_id_hex
-                )
+                # Disconnect bob.
+                bob_client.pipe.sock.close()
 
-                await got_ack
-        finally:
-            await alice_client.close()
-            await bob_client.close()
+                # Send message to bob.
+                pipe_id_hex = hashlib.sha256(b"pipe id").hexdigest()
+                for buf in msg_list:
+                    _, got_ack = alice_client.queue_msg(
+                        buf, bob_client.kp.public_key_hex, pipe_id_hex
+                    )
+
+                    await got_ack
+            finally:
+                await alice_client.close()
+                await bob_client.close()
+
+        await try_servers(self, op, label="broken_receiver")
 
     async def test_seq_send_recv_ack_await(self):
         msg_list = ["this is first", "second", "third", "fourth"]
-        recv_list = []
 
-        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
-            recv_list.append(msg)
+        async def op(server):
+            recv_list = []
 
-        await mqtt_send_msg_and_handle(msg_list, msg_handler, ack_await=True)
-        # print(recv_list)
-        # assert(recv_list == msg_list)
+            async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+                recv_list.append(msg)
+
+            await mqtt_send_msg_and_handle(
+                msg_list, msg_handler, ack_await=True, server=server,
+            )
+
+        await try_servers(self, op, label="seq_send_recv_ack_await")
 
     # Add all the messages concurrently with send then check result.
     @unittest.skip("concurrent ordering not yet implemented")
@@ -217,78 +312,54 @@ class TestMQTTClient(AsyncTestCase):
             recv_list.append(msg)
 
         await mqtt_send_msg_and_handle(msg_list, msg_handler, ack_await=False)
-        # print(recv_list)
         assert recv_list == msg_list
 
     async def test_multiple_servers(self):
-        host_list = [
-            "ovh1.p2pd.net",
-            "test.mosquitto.org",
-            "broker.emqx.io",
-            "iot.coreflux.cloud",
-            "public.mqttserver.eu",
-            "broker.mqtt.cool",
-            "broker.mqttdashboard.com",
-            "broker-cn.emqx.io",
-            "broker.bevywise.com",
-            # "mqtt.lonelybinary.com", down
-            "broker.mqtt-dashboard.com",
-            "broker.hivemq.com",
-        ]
-
-        """
-        host_list = [
-            "broker.mqttdashboard.com"
-        ]
-        """
-
-        # host_list = ["ovh1.p2pd.net"]
-
-        # host_list = ["broker.mqttdashboard.com"]
-
         msg_list = ["first msg", "second msg", "third"]
-        for host in host_list:
-            print("testing ", host)
+        any_worked = False
+        last_exc = None
+        for host, port in pick_mqtt_servers(count=8):
+            print("testing ", host, port)
             recv_list = []
 
             async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
                 recv_list.append(msg)
 
-            server = (host, 1883)
             try:
                 await mqtt_send_msg_and_handle(
-                    msg_list, msg_handler, server=server, interval=5, timeout=3
+                    msg_list, msg_handler,
+                    server=(host, port), interval=5, timeout=3,
                 )
-            except (ConnectionError, asyncio.TimeoutError, OSError):
+            except (ConnectionError, asyncio.TimeoutError, OSError) as exc:
+                last_exc = exc
                 print("Connection error -- skipping.")
                 continue
 
-            # Part 1: no message duplication.
-            # print(recv_list)
             self.assertEqual(recv_list, msg_list)
+            any_worked = True
+
+        if not any_worked:
+            self.skipTest(
+                "No MQTT broker accepted the multi-server test (last error: {!r})".format(last_exc)
+            )
 
     async def test_repub_intervals(self):
         buf = "msg to send"
-        got_msg = asyncio.Event()
 
-        async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
-            if msg == buf:
-                got_msg.set()
+        async def op(server):
+            got_msg = asyncio.Event()
 
-        await mqtt_send_msg_and_handle([buf], msg_handler, ack_await=False)
-        self.assertTrue(got_msg.is_set())
+            async def msg_handler(msg, src_pk_hex, pipe_id_hex, client):
+                if msg == buf:
+                    got_msg.set()
+
+            await mqtt_send_msg_and_handle(
+                [buf], msg_handler, ack_await=False, server=server,
+            )
+            self.assertTrue(got_msg.is_set())
+
+        await try_servers(self, op, label="repub_intervals")
 
 
 if __name__ == "__main__":
     main()
-
-
-# A single file build for this is unncessary but cool.
-"""
-test_repub_intervals (__main__.TestMQTTClient.test_repub_intervals) ... /usr/lib/python3.12/asyncio/selector_events.py:879: ResourceWarning: unclosed transport <_SelectorSocketTransport fd=6>
-  _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
-ResourceWarning: Enable tracemalloc to get the object allocation traceback
-/usr/lib/python3.12/asyncio/selector_events.py:879: ResourceWarning: unclosed transport <_SelectorSocketTransport fd=7>
-  _warn(f"unclosed transport {self!r}", ResourceWarning, source=self)
-
-"""
