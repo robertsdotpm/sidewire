@@ -127,6 +127,14 @@ class MQTTClient:
         # Used to get unix timestamp.
         self.get_time = get_time
 
+        # Tracks the last queue_msg() call so the Router-level idle
+        # closer can leave actively-used clients alone. None == never
+        # used to send, in which case the idle-closer treats the
+        # client's connect time as the activity baseline so a freshly-
+        # opened-but-unused MQTTClient still gets a full idle window
+        # before being considered for closure.
+        self.last_send = None
+
     # Receive back app protocol msgs unpacked.
     def add_msg_handler(self, msg_handler: Callable) -> None:
         """Register a callback to receive decoded incoming application messages."""
@@ -204,6 +212,13 @@ class MQTTClient:
     ) -> Tuple[Tuple[str, int], asyncio.Future]:
         """Queue a signed message for reliable delivery to the given destination public key."""
         queue_id_hex = queue_id_hex or to_h(rand_b(32))
+        # Track activity so the Router idle-closer can leave busy
+        # clients alone. A client is "active" when something has
+        # asked it to publish in the last N minutes; we use the
+        # send-side timestamp (queue_msg, not the actual ACK) so
+        # an offline broker still keeps its client alive while
+        # the dispatcher retries in the background.
+        self.last_send = self.get_time()
         return ordered_ack_send(self, msg, dest_pk_hex, queue_id_hex, msg_type, seq_no)
 
     # Stops broadcasting a msg.

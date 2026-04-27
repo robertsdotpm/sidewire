@@ -29,12 +29,27 @@ If a server is down, maybe have a flag that disables it from reconnect retry in 
 code otherwise it blocks the whole program for servers it already knows are down.
 """
 
+import asyncio
 import time
 from typing import Any, Callable, Dict, List, Optional
-from aionetiface import IP4, IP6, Interface
+from aionetiface import IP4, IP6, Interface, async_wrap_errors, log_exception
 from .mqtt import MQTTClient
 from .smart_pipe import SmartPipe
 from .utils import get_dest_clients, get_mqtt_server_list
+
+
+# An MQTT pipe is closed if no queue_msg call landed on it within this
+# many seconds. 10 minutes balances "free up sockets and broker rate-
+# limit slots when nobody's using a remote client" against "don't churn
+# the connection if a peer-pipe goes quiet for a few minutes between
+# signals".
+IDLE_CLIENT_TIMEOUT = 600
+
+# How often the idle-closer wakes up to scan client.last_send. The
+# closer is cheap (just a timestamp comparison per client), so 60s is
+# fine -- worst case a client stays open up to IDLE_CLIENT_TIMEOUT +
+# IDLE_CLIENT_INTERVAL after its last send.
+IDLE_CLIENT_INTERVAL = 60
 
 
 class Router:
@@ -76,6 +91,18 @@ class Router:
 
         self.cache = {}
 
+        # Clients in this set are exempt from the idle-closer below:
+        # they're the rendezvous-hash group for our OWN public key
+        # (set by start()), which is how we receive inbound messages.
+        # Closing those breaks the inbound path even when nothing's
+        # been sent, so they stay open for the lifetime of the Router.
+        self.protected_clients = set()
+
+        # Background task for the idle-closer. Started by start();
+        # cancelled by close(). Set to None when not running so close()
+        # can be called repeatedly without raising.
+        self.idle_closer_task = None
+
     def add_msg_handler(self, msg_handler: Callable) -> None:
         """Register a message handler on all managed MQTT clients."""
         for af in self.clients:
@@ -83,13 +110,97 @@ class Router:
                 self.clients[af][host].add_msg_handler(msg_handler)
 
     async def start(self) -> List[Any]:
-        """Connect to the best MQTT servers for this node's own public key."""
+        """Connect to the best MQTT servers for this node's own public key.
+
+        The clients returned here form the *first loaded group* -- they
+        carry our inbound subscription, so the idle-closer below leaves
+        them alone for the Router's lifetime regardless of send activity.
+        """
         clients = await get_dest_clients(
             self.nic, self.kp.public_key_hex, self.servers, self.clients
         )
 
+        # Pin these as the protected (inbound) set. Future start() calls
+        # would extend, not replace, but in practice start() is one-shot.
+        for client in clients:
+            self.protected_clients.add(client)
+
         self.cache_clients(self.kp.public_key_hex, clients)
+
+        # Idempotent: only spawn the idle closer once, and only after
+        # we know which clients are protected. Otherwise an early tick
+        # could see an empty protected set and close everything.
+        if self.idle_closer_task is None or self.idle_closer_task.done():
+            self.idle_closer_task = asyncio.ensure_future(
+                async_wrap_errors(self.idle_closer_loop())
+            )
+
         return clients
+
+    async def idle_closer_loop(self) -> None:
+        """Periodically close MQTT clients that haven't been used to send.
+
+        Walks self.clients every IDLE_CLIENT_INTERVAL and closes any
+        client whose last_send is older than IDLE_CLIENT_TIMEOUT,
+        SKIPPING anything in self.protected_clients. Closed clients
+        are also evicted from any cache entries that reference them
+        so subsequent pipe() calls discover and reconnect fresh.
+        """
+        while True:
+            try:
+                await asyncio.sleep(IDLE_CLIENT_INTERVAL)
+            except asyncio.CancelledError:
+                return
+
+            try:
+                await self.close_idle_clients()
+            except asyncio.CancelledError:
+                return
+            except (OSError, ConnectionError):
+                log_exception()
+
+    async def close_idle_clients(self) -> None:
+        """One pass of the idle-closer; exposed for tests + manual triggers."""
+        now = self.get_time()
+        for af in self.clients:
+            for host in self.clients[af]:
+                client = self.clients[af][host]
+                # Skip the inbound (start()-loaded) group and any
+                # client that hasn't yet been connected (no
+                # dispatcher_task means there's nothing to close).
+                if client in self.protected_clients:
+                    continue
+                if client.dispatcher_task is None:
+                    continue
+                # last_send None means the client is open but never
+                # used for a send -- the connect time is the activity
+                # baseline so freshly-opened clients still get a full
+                # idle window before being closed.
+                last_active = client.last_send
+                if last_active is None:
+                    last_active = getattr(client, "last_connect", None) or now
+                    client.last_send = last_active
+                if (now - last_active) < IDLE_CLIENT_TIMEOUT:
+                    continue
+
+                try:
+                    await client.close()
+                except (OSError, ConnectionError):
+                    log_exception()
+
+                # Evict cache entries that reference this client so
+                # the next pipe() call rediscovers and reconnects
+                # rather than handing back a closed-but-cached entry.
+                self.evict_client_from_cache(client)
+
+    def evict_client_from_cache(self, client: Any) -> None:
+        """Drop any cache entry whose client list contains *client*."""
+        stale_keys = []
+        for pub_key_hex, entry in self.cache.items():
+            if client in entry.get("clients", ()):
+                stale_keys.append(pub_key_hex)
+        for k in stale_keys:
+            del self.cache[k]
 
     async def pipe(
         self, dest_pub_hex: str, use_cache: bool = False, expiry: int = 3600
@@ -118,6 +229,16 @@ class Router:
 
     async def close(self) -> None:
         """Close all managed MQTT client connections."""
+        # Stop the idle closer first so it can't race a client.close()
+        # below and double-fire on the same socket.
+        if self.idle_closer_task is not None and not self.idle_closer_task.done():
+            self.idle_closer_task.cancel()
+            try:
+                await self.idle_closer_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self.idle_closer_task = None
+
         for af in self.clients:
             for host in self.clients[af]:
                 client = self.clients[af][host]
