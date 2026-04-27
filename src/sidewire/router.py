@@ -39,11 +39,14 @@ from .utils import get_dest_clients, get_mqtt_server_list
 
 
 # An MQTT pipe is closed if no queue_msg call landed on it within this
-# many seconds. 10 minutes balances "free up sockets and broker rate-
-# limit slots when nobody's using a remote client" against "don't churn
-# the connection if a peer-pipe goes quiet for a few minutes between
-# signals".
-IDLE_CLIENT_TIMEOUT = 600
+# many seconds. 5 minutes lines up well with how p2p signal sessions
+# actually run -- bursts of activity lasting seconds, then idle for
+# minutes-to-hours -- so a client that's quiet for 5 minutes is almost
+# always done.  Reconnect cost is one MQTT CONNECT handshake (~sub-
+# second), so closing aggressively is cheap; the broker rate-limit
+# slot freed up matters more.  Inbound subs are NEVER closed (they
+# live in protected_clients) so 5 minutes is safe for receive too.
+IDLE_CLIENT_TIMEOUT = 300
 
 # How often the idle-closer wakes up to scan client.last_send. The
 # closer is cheap (just a timestamp comparison per client), so 60s is
