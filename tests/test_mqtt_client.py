@@ -1,5 +1,6 @@
 from aionetiface import *
 from aionetiface import IP4, UDP, get_infra
+from aionetiface.testing import AsyncTestCase
 from sidewire import *
 
 # Server used for tests.

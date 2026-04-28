@@ -1,5 +1,6 @@
 from aionetiface import *
 from aionetiface import IP4, UDP, get_infra
+from aionetiface.testing import AsyncTestCase
 
 
 def pick_mqtt_servers(count=5):

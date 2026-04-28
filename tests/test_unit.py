@@ -25,6 +25,7 @@ from sidewire.mqtt.utils import (
 from sidewire.mqtt.app_packet import AppPacket
 from sidewire.mqtt.mqtt_defs import MsgEnum
 from sidewire.utils import interleave_buckets, get_server_score
+from aionetiface.testing import AsyncTestCase
 
 
 # ---------------------------------------------------------------------------
