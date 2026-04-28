@@ -61,8 +61,8 @@ def rendezvous_hash(nic: Any, pub_key_hex: str, servers: Dict) -> List[Dict]:
 async def try_client(
     dest_pub_hex: str,
     client: Any,
-    connect_timeout: int = 15,
-    probe_timeout: int = 15,
+    connect_timeout: int = 30,
+    probe_timeout: int = 30,
     retry_duration: int = 1200,
 ) -> Optional[Any]:
     """Probe a single MQTT client to verify the destination is reachable; return the client or None.
