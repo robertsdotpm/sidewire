@@ -61,11 +61,23 @@ def rendezvous_hash(nic: Any, pub_key_hex: str, servers: Dict) -> List[Dict]:
 async def try_client(
     dest_pub_hex: str,
     client: Any,
-    connect_timeout: int = 3,
-    probe_timeout: int = 3,
+    connect_timeout: int = 8,
+    probe_timeout: int = 8,
     retry_duration: int = 1200,
 ) -> Optional[Any]:
-    """Probe a single MQTT client to verify the destination is reachable; return the client or None."""
+    """Probe a single MQTT client to verify the destination is reachable; return the client or None.
+
+    The default 8s budget for both connect and probe is intentionally
+    generous: old/slow VMs (XP, Vista) frequently take 4-7s to
+    complete the MQTT CONNECT handshake, especially over the mobile
+    second NIC. A tighter timeout silently shrinks their reachable
+    broker set, which produces an asymmetric old<->modern delivery
+    pattern -- old peer publishes to broker A, but modern peer's
+    self-probe on broker A timed out at startup so the inbound
+    subscription was never registered there, and the message goes
+    to /dev/null. 8s gives the slow handshakes room to finish so
+    both sides converge on the same broker subset.
+    """
     # Connect if not already connected, with rate limiting.
     if client.dispatcher_task is None:
         now = client.get_time()
