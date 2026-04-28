@@ -1,7 +1,23 @@
+import time as time_module
 from aionetiface import *
 from aionetiface import IP4, UDP, get_infra
 from aionetiface.testing import AsyncTestCase
+from aionetiface.utility.sys_clock import SysClock
 from sidewire import *
+
+
+def make_test_sys_clock(nic):
+    """Return a SysClock for tests, seeded from wall clock.
+
+    Production code must pass node.sys_clock.time (NTP-synced) into
+    Router/MQTTClient -- the explicit-get_time requirement exists
+    specifically to surface bugs when that wiring is wrong. Tests
+    don't exercise the cross-machine clock-skew path though, so a
+    wall-clock-seeded SysClock is sufficient and avoids the per-test
+    NTP probe latency. SysClock(ntp=...) skips the NTP probes in
+    start() entirely (the start() short-circuit).
+    """
+    return SysClock(nic, ntp=time_module.time())
 
 # Server used for tests.
 USE_AF = None
@@ -55,7 +71,8 @@ def get_mqtt_client(server=None):
         server = MQTT_SERVER
 
     kp = Signing.keypair()
-    client = MQTTClient(af, nic, server, kp)
+    sys_clock = make_test_sys_clock(nic)
+    client = MQTTClient(af, nic, server, kp, get_time=sys_clock.time)
     return client
 
 
