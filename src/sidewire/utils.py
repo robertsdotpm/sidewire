@@ -61,58 +61,54 @@ def rendezvous_hash(nic: Any, pub_key_hex: str, servers: Dict) -> List[Dict]:
 async def try_client(
     dest_pub_hex: str,
     client: Any,
-    connect_timeout: int = 30,
-    probe_timeout: int = 30,
+    connect_timeout: int = 15,
     retry_duration: int = 1200,
 ) -> Optional[Any]:
-    """Probe a single MQTT client to verify the destination is reachable; return the client or None.
+    """Return client if we can connect+subscribe to its broker, else None.
 
-    The 15s budget for both connect and probe accommodates the full
-    peer round-trip through the broker (MQTT CONNECT + SUBSCRIBE on
-    the publisher, broker forwards to the destination peer,
-    destination's async stack handles the PROBE message and
-    publishes MSGACK, broker forwards back). On XP/Vista that
-    round-trip can take 7-10s on a healthy path. Tighter timeouts
-    silently exclude brokers based on flaky network state rather
-    than broker identity, producing the broker-set non-convergence
-    bug that breaks reverse_connect across mixed old<->modern
-    pairs: each peer's probe-success subset of a 20-broker pool
-    ends up narrow and biased toward "what this VM finds fast",
-    and narrow biased subsets routinely don't overlap.
+    No round-trip probe. The previous implementation sent a PROBE
+    to dest_pub_hex and waited up to N seconds for the destination
+    peer to ACK, using that round-trip as the membership filter.
+    That filter was the actual root cause of broker-set non-
+    convergence across the matrix: round-trip success depends on
+    BOTH peers' transient network state plus the destination's
+    async-loop scheduling latency, so two peers running the
+    deterministic rendezvous-rank walk for the same target pubkey
+    would each end up with different "successful" subsets of the
+    same ranked candidate list, biased toward "brokers I happen to
+    find fast on this run". Bumping N papered over the symptom but
+    didn't fix the cause.
 
-    15s gives healthy slow-VM round-trips room to finish without
-    pathological waits on genuinely-broken paths. Reconnect cost
-    on a healthy VM is still sub-second.
+    Membership is now: "I can MQTT-CONNECT to this broker and my
+    own SUBSCRIBE for self_pub_hex was acknowledged". That signal
+    is local to this peer, doesn't depend on the destination peer's
+    runtime state, and -- crucially -- gives every peer the SAME
+    subset of the rendezvous-ranked candidates (modulo this peer's
+    own connectivity). Two peers walking the same ranking for the
+    same target pubkey now converge on the same broker subset
+    automatically. Cross-peer publish goes through the rendezvous
+    ranking the destination ALSO chose, so delivery succeeds.
+
+    Rate limiter: only fires on actual connect FAILURE, not on every
+    attempt. The previous code set last_connect = now BEFORE the
+    connect attempt, so any momentary failure locked the broker
+    out for retry_duration (1200s = 20min). Now last_connect is
+    only set inside the except branch, so successful (or recovered)
+    connects don't poison the per-broker cache.
     """
-    # Connect if not already connected, with rate limiting.
     if client.dispatcher_task is None:
         now = client.get_time()
         if client.last_connect is not None:
             if (now - client.last_connect) < retry_duration:
                 return None
         try:
-            client.last_connect = now
             await asyncio.wait_for(client.connect(), connect_timeout)
         except (OSError, ConnectionError, asyncio.TimeoutError):
+            client.last_connect = now
             log_exception()
             return None
 
-    # Probe to check if dest is on this server. send_probe direct-
-    # publishes the PROBE bypassing the dispatcher's backoff/jitter
-    # loop -- the ordinary publish path adds 0-2s pre-publish jitter
-    # and runs at 0.5s cadence which under concurrent probe load
-    # silently exceeds probe_timeout and shrinks the discovered
-    # broker set asymmetrically (the mechanism behind the broker-
-    # set non-convergence bug).
-    probe_queue_id = to_h(rand_b(32))
-    _, ack = await client.send_probe(dest_pub_hex, probe_queue_id)
-    try:
-        await asyncio.wait_for(ack, probe_timeout)
-        return client
-    except asyncio.TimeoutError:
-        return None
-    finally:
-        client.dequeue_msg(probe_queue_id, msg_type=MsgEnum.PROBE)
+    return client
 
 
 async def get_dest_clients(
@@ -120,24 +116,20 @@ async def get_dest_clients(
     dest_pub_hex: str,
     servers: Dict,
     clients_map: Dict,
-    n: int = 8,
+    n: int = 4,
     max_servers: int = 20,
 ) -> List[Any]:
     """Discover and return up to n MQTT clients that can reach the destination public key.
 
-    n is sized so two peers' subscribe sets reliably overlap on the
-    ~20-broker pool. Empirical sizing across the 6-VM matrix:
-      n=4: 2 zero-overlap cells under load (bad)
-      n=6: no zeros across 3 runs but 1 fragile cell hit min=1
-           in a single run (vista->win7 dropped on a bad run)
-      n=8: target safety margin -- per-AF top-4 after interleave
-           gives wide enough sets that one bad broker run can't
-           push a pair below 2 overlap.
-
-    Cost: ~8 idle MQTT subscriptions per peer. Tiny TCP keepalives,
-    even slow VMs handle this fine. Fan-out costs zero extra
-    publishes since the publish-target set is the SAME ranked
-    candidate list independent of n.
+    n=4 is the natural minimum: ~2 brokers per AF after interleave
+    gives every peer enough redundancy without keeping excessive
+    idle MQTT sessions. With the round-trip probe removed from
+    try_client (membership now = "I can connect+subscribe at
+    this broker"), every peer walks the deterministic rendezvous
+    ranking for the same target pubkey and converges on the same
+    broker subset automatically -- modulo each peer's own
+    connectivity, which is far more stable than the previous
+    probe-round-trip filter. n=4 should now converge cleanly.
     """
     candidate_clients = []
     sorted_servers = rendezvous_hash(nic, dest_pub_hex, servers)
