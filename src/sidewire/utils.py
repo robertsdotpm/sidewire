@@ -120,26 +120,22 @@ async def get_dest_clients(
     dest_pub_hex: str,
     servers: Dict,
     clients_map: Dict,
-    n: int = 12,
+    n: int = 4,
     max_servers: int = 20,
 ) -> List[Any]:
     """Discover and return up to n MQTT clients that can reach the destination public key.
 
-    n=12 is chosen so two peers' broker subsets overlap with very
-    high probability across the ~20-broker pool. With n=4 the
-    pigeonhole math gave ~62% chance of zero overlap for two random
-    4-subsets of 10 IPv4 brokers, which is exactly what we observed
-    in the broker_membership diagnostic: cross-cohort (old<->modern)
-    pairs had zero overlap and reverse_connect ConMsgs silently
-    dropped. n=12 turns "narrow disjoint subsets" into "wide
-    intersecting subsets" -- with 12-of-20 selection per peer the
-    minimum guaranteed overlap is 4 brokers (12+12-20).
-
-    Cost: more open MQTT connections per peer (~12 idle subscriptions
-    vs 4). MQTT keepalives are tiny (~50 bytes/min); modern brokers
-    happily accept dozens of idle subscriptions. XP/Vista handle 10+
-    sockets without breaking a sweat. The convergence guarantee is
-    cheap.
+    n=4 is the minimum set size we test for convergence under the
+    other fixes (NTP-synced clocks, direct-publish probes,
+    direct-publish MSGACKs, post-startup sync window). Earlier
+    runs showed n=4 broke convergence cross-cohort because the
+    probe-filter had three compounding sources of non-determinism
+    (timeout-based probe drop, dispatcher-jitter-delayed publish,
+    clock-skew-rejected message) that biased each peer's "first 4
+    successes" toward different broker subsets. With those root
+    causes addressed the rendezvous-deterministic ranking should
+    converge naturally and even n=4 should produce overlap. If
+    not, n is the floor we have to bump.
     """
     candidate_clients = []
     sorted_servers = rendezvous_hash(nic, dest_pub_hex, servers)
