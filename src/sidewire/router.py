@@ -62,11 +62,23 @@ class Router:
         self,
         kp: Any,
         msg_handler: Optional[Callable] = None,
-        get_time: Callable[[], float] = time.time,
+        get_time: Optional[Callable[[], float]] = None,
         nic: Any = None,
         servers: Optional[Dict] = None,
     ) -> None:
-        """Initialize a Router with a key pair and optional server list."""
+        """Initialize a Router with a key pair and optional server list.
+
+        get_time MUST be supplied (no implicit time.time fallback)
+        so the same clock source threads through to every
+        MQTTClient at construction time. See MQTTClient.__init__
+        rationale -- silently defaulting to wall clock hid a real
+        cross-machine clock-skew bug.
+        """
+        if get_time is None:
+            raise ValueError(
+                "Router: get_time is required (pass node.sys_clock.time, "
+                "not time.time directly)"
+            )
         self.kp = kp
         self.servers = servers or get_mqtt_server_list()
         self.get_time = get_time

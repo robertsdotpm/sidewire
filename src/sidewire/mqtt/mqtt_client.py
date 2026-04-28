@@ -74,9 +74,27 @@ class MQTTClient:
         nic: Any,
         dest: Tuple[str, int],
         kp: Any,
-        get_time: Callable[[], float] = time.time,
+        get_time: Optional[Callable[[], float]] = None,
     ) -> None:
-        """Initialize an MQTTClient with network, destination, and key-pair settings."""
+        """Initialize an MQTTClient with network, destination, and key-pair settings.
+
+        get_time MUST be supplied (no implicit time.time fallback).
+        Silently using wall clock here was hiding a real clock-skew
+        bug in the matrix: when XP/Vista's BIOS clocks drift hours
+        from modern VMs, every cross-cohort MQTT message was being
+        dropped by handle_publish's timestamp-vs-max_age check
+        (~120s window). The Router patches the clock on the Router
+        object after construction, but that patch never propagates
+        into already-constructed MQTTClient instances. Forcing
+        callers to pass get_time explicitly turns this into a loud
+        failure.
+        """
+        if get_time is None:
+            raise ValueError(
+                "MQTTClient: get_time is required (pass node.sys_clock.time, "
+                "not time.time directly -- the latter silently hides clock-"
+                "skew bugs across the matrix)"
+            )
         # Addressing info for connected MQTT server.
         self.af = af
         self.nic = nic

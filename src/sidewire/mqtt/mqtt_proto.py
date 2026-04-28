@@ -91,11 +91,22 @@ async def handle_publish(client: Any, packet: Any) -> None:
     if app_packet is None:
         return
 
-    # Reject messages older than 2x republish_duration for replay attacks.
-    max_age = 2 * getattr(client, "republish_duration", 60)
-    elapsed = int(client.get_time()) - app_packet.timestamp
-    if elapsed > max_age:
-        return
+    # Reject MSG-class messages older than 2x republish_duration to
+    # mitigate replay attacks against signed application payloads.
+    # Probes (and their corresponding MSGACKs) are exempt: they're
+    # ephemeral discovery messages with random per-call queue_id
+    # dedup, no payload worth replaying, and round-trip in seconds.
+    # Applying this check to probes was producing a clock-skew-
+    # dependent bug -- VMs whose wall clocks drift hours apart
+    # (XP/Vista BIOS drift vs modern NTP-synced) silently dropped
+    # every cross-cohort probe, breaking broker-set discovery and
+    # cascading into reverse_connect signal-channel failures.
+    # Discovery shouldn't depend on synchronised clocks.
+    if app_packet.msg_type == MsgEnum.MSG:
+        max_age = 2 * getattr(client, "republish_duration", 60)
+        elapsed = int(client.get_time()) - app_packet.timestamp
+        if elapsed > max_age:
+            return
 
     # Route to application logic based on message type.
     if app_packet.msg_type == MsgEnum.MSG:
