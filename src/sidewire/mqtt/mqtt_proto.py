@@ -11,7 +11,7 @@ the MQTT protocol possible:
 """
 
 from typing import Any
-from aionetiface import h_to_b
+from aionetiface import h_to_b, log, fstr
 from .mqtt_defs import MQTTEnum, MsgEnum
 from .mqtt_packet import mqtt_parse_publish
 from .app_packet import AppPacket
@@ -73,6 +73,7 @@ async def handle_publish(client: Any, packet: Any) -> None:
     # Publish-specific function for parsing a packet.
     parsed = mqtt_parse_publish(packet)
     if not parsed:
+        log("[MQTT-RX] handle_publish: mqtt_parse_publish returned None; dropping")
         return
 
     # Immediate MQTT Ack to keep the broker's in-flight window open
@@ -84,11 +85,24 @@ async def handle_publish(client: Any, packet: Any) -> None:
     # Key Check: Is this message meant for us?
     # Comparing binary to binary for safety.
     if h_to_b(topic) != client.kp.compact_public_key:
+        log(fstr(
+            "[MQTT-RX] handle_publish: topic mismatch (broker={0} topic={1}... self={2}...); dropping",
+            (
+                getattr(client, "host", "?"),
+                topic[:16] if topic else "?",
+                client.kp.public_key_hex[:16],
+            ),
+        ))
         return
 
     # Verify signature and extract fields.
     app_packet = AppPacket.unpack(payload)
     if app_packet is None:
+        log(fstr(
+            "[MQTT-RX] handle_publish: AppPacket.unpack returned None (broker={0}; "
+            "bad signature or malformed packet); dropping",
+            (getattr(client, "host", "?"),),
+        ))
         return
 
     # Reject MSG-class messages older than 2x republish_duration to
@@ -106,9 +120,30 @@ async def handle_publish(client: Any, packet: Any) -> None:
         max_age = 2 * getattr(client, "republish_duration", 60)
         elapsed = int(client.get_time()) - app_packet.timestamp
         if elapsed > max_age:
+            log(fstr(
+                "[MQTT-RX] handle_publish: MSG too old (broker={0} elapsed={1}s "
+                "max_age={2}s timestamp={3} now={4}); dropping",
+                (
+                    getattr(client, "host", "?"),
+                    elapsed, max_age,
+                    app_packet.timestamp,
+                    int(client.get_time()),
+                ),
+            ))
             return
 
     # Route to application logic based on message type.
+    log(fstr(
+        "[MQTT-RX] handle_publish: routing msg_type={0} src_pk={1}... "
+        "queue_id={2}... seq={3} broker={4}",
+        (
+            app_packet.msg_type,
+            (app_packet.src_pk_hex or "?")[:16],
+            (app_packet.queue_id_hex or "?")[:16],
+            app_packet.seq_no,
+            getattr(client, "host", "?"),
+        ),
+    ))
     if app_packet.msg_type == MsgEnum.MSG:
         await process_app_msg(client, app_packet)
     elif app_packet.msg_type == MsgEnum.MSGACK:
