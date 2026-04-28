@@ -120,22 +120,20 @@ async def get_dest_clients(
     dest_pub_hex: str,
     servers: Dict,
     clients_map: Dict,
-    n: int = 4,
+    n: int = 6,
     max_servers: int = 20,
 ) -> List[Any]:
     """Discover and return up to n MQTT clients that can reach the destination public key.
 
-    n=4 is the minimum set size we test for convergence under the
-    other fixes (NTP-synced clocks, direct-publish probes,
-    direct-publish MSGACKs, post-startup sync window). Earlier
-    runs showed n=4 broke convergence cross-cohort because the
-    probe-filter had three compounding sources of non-determinism
-    (timeout-based probe drop, dispatcher-jitter-delayed publish,
-    clock-skew-rejected message) that biased each peer's "first 4
-    successes" toward different broker subsets. With those root
-    causes addressed the rendezvous-deterministic ranking should
-    converge naturally and even n=4 should produce overlap. If
-    not, n is the floor we have to bump.
+    n is sized so two peers' subscribe sets reliably overlap on the
+    ~20-broker pool. n=4 was empirically too tight: even with all
+    the other convergence fixes (NTP-synced clocks, direct-publish
+    probes + MSGACKs, post-startup sync window) we observed
+    sporadic zero-overlap cells when one peer's top-4 happened
+    to land entirely outside another peer's top-4 due to broker
+    reachability variance. n=6 doubles the per-AF slot count after
+    interleave (~3 each) and gives meaningful overlap headroom
+    without the n=12 ceiling we used as a defensive bump earlier.
     """
     candidate_clients = []
     sorted_servers = rendezvous_hash(nic, dest_pub_hex, servers)
