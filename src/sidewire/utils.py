@@ -61,22 +61,31 @@ def rendezvous_hash(nic: Any, pub_key_hex: str, servers: Dict) -> List[Dict]:
 async def try_client(
     dest_pub_hex: str,
     client: Any,
-    connect_timeout: int = 8,
-    probe_timeout: int = 8,
+    connect_timeout: int = 30,
+    probe_timeout: int = 30,
     retry_duration: int = 1200,
 ) -> Optional[Any]:
     """Probe a single MQTT client to verify the destination is reachable; return the client or None.
 
-    The default 8s budget for both connect and probe is intentionally
-    generous: old/slow VMs (XP, Vista) frequently take 4-7s to
-    complete the MQTT CONNECT handshake, especially over the mobile
-    second NIC. A tighter timeout silently shrinks their reachable
-    broker set, which produces an asymmetric old<->modern delivery
-    pattern -- old peer publishes to broker A, but modern peer's
-    self-probe on broker A timed out at startup so the inbound
-    subscription was never registered there, and the message goes
-    to /dev/null. 8s gives the slow handshakes room to finish so
-    both sides converge on the same broker subset.
+    The 30s budget for both connect and probe is deliberately
+    generous: the probe is a FULL peer round-trip through the broker
+    (MQTT CONNECT + SUBSCRIBE on the publisher, broker forwards to
+    the destination peer, destination's async stack handles the
+    PROBE message and publishes MSGACK, broker forwards back). On
+    XP/Vista that round-trip can take 7-10s on a healthy path; any
+    transient slowness pushes it past 15s. Tighter timeouts
+    silently exclude brokers based on flaky network state rather
+    than broker identity, producing the broker-set non-convergence
+    bug that breaks reverse_connect across mixed old<->modern pairs:
+    each peer's probe-success subset is biased toward "what this VM
+    happens to find fast", and two narrow-but-fast subsets of a
+    20-broker pool routinely don't overlap.
+
+    30s makes timeouts the exception rather than the rule -- the
+    membership filter becomes "broker really doesn't respond" not
+    "broker is slower than 8s on this run". Reconnect cost on a
+    healthy VM is still sub-second; only genuinely-broken paths
+    pay the full 30s.
     """
     # Connect if not already connected, with rate limiting.
     if client.dispatcher_task is None:
