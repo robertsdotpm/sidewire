@@ -70,18 +70,21 @@ async def mqtt_connect(self: Any, keep_alive: int) -> Any:
 
     # Check protocol response for conack.
     if connack != b" \x02\x00\x00":
+        # fstr() doesn't support the {n!r} format spec, so pre-render
+        # connack via repr() and pass the resulting string in.
+        connack_repr = repr(connack)
         log(fstr(
             "[MQTT-CONNECT] FAIL host={0}:{1} client_id={2}: bad CONNACK "
-            "{3!r} (empty bytes mean broker closed TCP after our CONNECT -- "
+            "{3} (empty bytes mean broker closed TCP after our CONNECT -- "
             "rate-limit / blacklist / malformed-packet rejection. Non-empty "
             "bytes that don't match would mean broker accepted but returned "
             "an error code.)",
-            (self.host, self.port, self.client_id, connack),
+            (self.host, self.port, self.client_id, connack_repr),
         ))
         await pipe.close()
         raise ConnectionError(fstr(
-            "Invalid MQTT CONNACK from {0}:{1} client_id={2}: {3!r}",
-            (self.host, self.port, self.client_id, connack),
+            "Invalid MQTT CONNACK from {0}:{1} client_id={2}: {3}",
+            (self.host, self.port, self.client_id, connack_repr),
         ))
 
     log(fstr(
