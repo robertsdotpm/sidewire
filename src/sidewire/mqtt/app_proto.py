@@ -65,7 +65,23 @@ async def process_app_msg(client: Any, app_packet: Any) -> None:
 # Function called for new application (type=probe) publishes.
 # ACKs the sender so discovery works, but never calls user handlers.
 async def process_app_probe(client: Any, app_packet: Any) -> None:
-    """Respond to a probe packet with an ACK to confirm reachability without invoking user message handlers."""
+    """Respond to a probe packet with a direct-published ACK.
+
+    The probe round-trip is time-bounded: the originator's
+    try_client awaits the ack on a fixed timeout (~15s). On slow VMs
+    (XP/Vista) the dispatcher's 0.5s scan cadence + 0-2s first-
+    publish jitter can push the ack publish beyond that budget,
+    which manifested as bidirectional broker-set non-convergence:
+    other peers' publish_for[vista] returned empty even though
+    vista's protected list claimed the right brokers, because
+    vista's ack was leaving the wire too late.
+
+    Direct-publish here mirrors the send_probe outbound fix --
+    the ack still gets registered in the MSGACK queue (so
+    process_app_ack on the originator can resolve the future),
+    but the MSGACK is shipped immediately and flagged
+    probe_one_shot so the dispatcher's republish loop skips it.
+    """
     # Does message already exist.
     found_msg = get_msg_from_queue(
         client,
@@ -77,16 +93,18 @@ async def process_app_probe(client: Any, app_packet: Any) -> None:
     if found_msg:
         return
 
-    # Otherwise schedule an ack for it.
+    # Direct-publish the MSGACK with the same shape as send_probe
+    # so the dispatcher's republish_meta short-circuits via
+    # probe_one_shot. Falling back to client.queue_msg here would
+    # re-introduce the jitter/backoff delay that was breaking
+    # cross-cohort probe acks.
     try:
-        client.queue_msg(
-            "ack",
+        await client.send_probe_ack(
             app_packet.src_pk_hex,
             app_packet.queue_id_hex,
-            MsgEnum.MSGACK,
             seq_no=app_packet.seq_no,
         )
-    except (ValueError, KeyError):
+    except (ValueError, KeyError, OSError):
         log_exception()
 
 

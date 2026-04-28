@@ -312,6 +312,63 @@ class MQTTClient:
 
         return (queue_id_hex, seq_no), app_ack
 
+    async def send_probe_ack(
+        self,
+        dest_pk_hex: str,
+        queue_id_hex: str,
+        seq_no: int,
+    ) -> None:
+        """Direct-publish a MSGACK in response to an inbound PROBE.
+
+        Mirror image of send_probe for the receiver side. The
+        responder receives a probe, queues a MSGACK, and we want
+        that MSGACK on the wire IMMEDIATELY -- the originator's
+        probe_timeout is ticking. Going through queue_msg ->
+        ordered_ack_send -> dispatcher would add 0-2s jitter and a
+        0.5s scan cadence which, on slow VMs (XP/Vista), routinely
+        pushes the ack past the originator's 15s budget and
+        produces silent broker-set non-convergence.
+
+        We still register the meta in msg_queues[MSGACK] so the
+        dedup check in process_app_probe (get_msg_from_queue)
+        finds it on subsequent duplicate probe deliveries; flagged
+        probe_one_shot so the dispatcher's republish_meta skips
+        retransmit.
+        """
+        self.last_send = self.get_time()
+
+        # Register meta the same shape as ordered_ack_send so
+        # subsequent dedup lookups hit. seq_no comes from the
+        # incoming probe so the (queue_id, seq_no) key matches.
+        if queue_id_hex not in self.msg_queues[MsgEnum.MSGACK]:
+            self.msg_queues[MsgEnum.MSGACK][queue_id_hex] = {}
+        if seq_no in self.msg_queues[MsgEnum.MSGACK][queue_id_hex]:
+            return  # already published this ack
+
+        from .app_packet import AppPacket
+        packet = AppPacket(
+            queue_id_hex=queue_id_hex,
+            seq_no=seq_no,
+            msg_type=MsgEnum.MSGACK,
+            msg="ack",
+        )
+        out = packet.pack(self)
+
+        app_ack = asyncio.Future()
+        self.msg_queues[MsgEnum.MSGACK][queue_id_hex][seq_no] = {
+            "app_ack": app_ack,
+            "dest_pk_hex": dest_pk_hex,
+            "seq_no": seq_no,
+            "out": out,
+            "updated": 0,
+            "created": self.get_time(),
+            "probe_one_shot": True,
+        }
+
+        buf, _ = self.publish(dest_pk_hex, out)
+        if self.pipe and not self.pipe.on_close.is_set():
+            await self.pipe.send(buf)
+
     # Stops broadcasting a msg.
     def dequeue_msg(
         self,
