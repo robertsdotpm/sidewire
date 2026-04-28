@@ -1,29 +1,77 @@
 import asyncio
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from aionetiface import log_exception, rand_b, to_h
-from .utils import get_dest_clients
+from .utils import get_dest_clients, try_client
 
 
 class SmartPipe:
     """Route messages to a destination over the best available MQTT clients."""
 
     def __init__(
-        self, router: Any, dest_pub_hex: str, clients: Optional[List[Any]] = None
+        self,
+        router: Any,
+        dest_pub_hex: str,
+        clients: Optional[List[Any]] = None,
+        hint_brokers: Optional[List[Dict]] = None,
     ) -> None:
-        """Initialize a SmartPipe with a router, destination public key, and optional pre-resolved clients."""
+        """Initialize a SmartPipe with a router, destination public key, optional pre-resolved clients, and optional hint brokers."""
         self.router = router
         self.dest_pub_hex = dest_pub_hex
         self.clients = clients or []  # type: List[Any]
+        # Hint brokers are {af, host, port} dicts the destination
+        # advertised in its addr_bytes. We try connecting to these
+        # first since the destination has guaranteed its
+        # subscription is live there.
+        self.hint_brokers = hint_brokers or []
+
+    async def resolve_hint_clients(self) -> List[Any]:
+        """Connect to each hint broker (if reachable) and return matching MQTTClient instances.
+
+        Walks self.hint_brokers (the destination's advertised
+        broker list) and tries to connect to each in turn. Any
+        broker we can connect+subscribe to gets returned. The
+        destination peer is GUARANTEED subscribed at these
+        brokers because they came from the dest's own
+        protected_clients list at addr-publish time.
+        """
+        out = []
+        for hint in self.hint_brokers:
+            af = hint.get("af")
+            host = hint.get("host")
+            port = hint.get("port")
+            if af is None or not host or not port:
+                continue
+            af_clients = self.router.clients.get(af, {})
+            client = af_clients.get(host)
+            if client is None:
+                # Hint broker isn't in our rendezvous-discovered
+                # clients_map (we never instantiated an MQTTClient
+                # for it). Skip -- if the dest is REALLY only
+                # reachable via this broker the whole convergence
+                # falls apart anyway, but that's a separate issue.
+                continue
+            connected = await try_client(self.dest_pub_hex, client)
+            if connected is not None:
+                out.append(connected)
+        return out
 
     async def connect(self, msg_cb: Optional[Callable] = None) -> "SmartPipe":
-        """Discover destination clients via rendezvous hash if not already resolved."""
+        """Resolve destination clients: hint brokers first, falling back to rendezvous."""
         if not self.clients:
-            self.clients = await get_dest_clients(
-                self.router.nic,
-                self.dest_pub_hex,
-                self.router.servers,
-                self.router.clients,
-            )
+            # Try hint brokers first. If we get at least one, use
+            # the hint set -- the dest is guaranteed subscribed.
+            if self.hint_brokers:
+                self.clients = await self.resolve_hint_clients()
+
+            # Fall back to rendezvous discovery if hints didn't
+            # produce any reachable clients.
+            if not self.clients:
+                self.clients = await get_dest_clients(
+                    self.router.nic,
+                    self.dest_pub_hex,
+                    self.router.servers,
+                    self.router.clients,
+                )
 
         if msg_cb:
             for client in self.clients:

@@ -218,9 +218,23 @@ class Router:
             del self.cache[k]
 
     async def pipe(
-        self, dest_pub_hex: str, use_cache: bool = False, expiry: int = 3600
+        self,
+        dest_pub_hex: str,
+        use_cache: bool = False,
+        expiry: int = 3600,
+        hint_brokers: Optional[List[Dict]] = None,
     ) -> SmartPipe:
-        """Create a SmartPipe to the destination, performing rendezvous discovery if needed."""
+        """Create a SmartPipe to the destination, performing rendezvous discovery if needed.
+
+        hint_brokers is an optional list of {af, host, port} dicts
+        the destination peer advertised in its addr_bytes -- the
+        brokers it is reliably connected at right now. SmartPipe
+        prefers these over the rendezvous-derived candidate set
+        because the destination has GUARANTEED its subscription is
+        live there, sidestepping the broker-set non-convergence
+        bug. Falls back to rendezvous discovery if no hints work
+        (or are passed).
+        """
         now = self.get_time()
         cached_clients = None  # type: Optional[List[Any]]
 
@@ -229,7 +243,9 @@ class Router:
             if (now - entry["updated"]) < expiry:
                 cached_clients = entry["clients"]
 
-        smart_pipe = SmartPipe(self, dest_pub_hex, clients=cached_clients)
+        smart_pipe = SmartPipe(
+            self, dest_pub_hex, clients=cached_clients, hint_brokers=hint_brokers,
+        )
         await smart_pipe.connect()
 
         if use_cache and cached_clients is None:
