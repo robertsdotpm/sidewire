@@ -120,20 +120,24 @@ async def get_dest_clients(
     dest_pub_hex: str,
     servers: Dict,
     clients_map: Dict,
-    n: int = 6,
+    n: int = 8,
     max_servers: int = 20,
 ) -> List[Any]:
     """Discover and return up to n MQTT clients that can reach the destination public key.
 
     n is sized so two peers' subscribe sets reliably overlap on the
-    ~20-broker pool. n=4 was empirically too tight: even with all
-    the other convergence fixes (NTP-synced clocks, direct-publish
-    probes + MSGACKs, post-startup sync window) we observed
-    sporadic zero-overlap cells when one peer's top-4 happened
-    to land entirely outside another peer's top-4 due to broker
-    reachability variance. n=6 doubles the per-AF slot count after
-    interleave (~3 each) and gives meaningful overlap headroom
-    without the n=12 ceiling we used as a defensive bump earlier.
+    ~20-broker pool. Empirical sizing across the 6-VM matrix:
+      n=4: 2 zero-overlap cells under load (bad)
+      n=6: no zeros across 3 runs but 1 fragile cell hit min=1
+           in a single run (vista->win7 dropped on a bad run)
+      n=8: target safety margin -- per-AF top-4 after interleave
+           gives wide enough sets that one bad broker run can't
+           push a pair below 2 overlap.
+
+    Cost: ~8 idle MQTT subscriptions per peer. Tiny TCP keepalives,
+    even slow VMs handle this fine. Fan-out costs zero extra
+    publishes since the publish-target set is the SAME ranked
+    candidate list independent of n.
     """
     candidate_clients = []
     sorted_servers = rendezvous_hash(nic, dest_pub_hex, servers)
