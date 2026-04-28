@@ -8,7 +8,7 @@ when done.
 import asyncio
 import random
 from typing import Any, Optional
-from aionetiface import Pipe, TCP, rand_plain, to_hs
+from aionetiface import Pipe, TCP, rand_plain, to_hs, log, fstr
 from .utils import reset_session_state
 from .mqtt_reader import mqtt_packet_reader
 from .mqtt_msgs import build_connect
@@ -28,12 +28,26 @@ async def mqtt_connect(self: Any, keep_alive: int) -> Any:
     self.client_id = self.client_id or rand_plain(15)
     route = self.nic.route(self.af)
 
+    log(fstr(
+        "[MQTT-CONNECT] starting host={0}:{1} af={2} client_id={3} keep_alive={4}",
+        (self.host, self.port, self.af, self.client_id, keep_alive),
+    ))
+
     # Establish TCP Connection
     pipe = await Pipe(TCP, (self.host, self.port), route).connect()
     if not pipe:
+        log(fstr(
+            "[MQTT-CONNECT] FAIL host={0}:{1}: TCP connect returned None",
+            (self.host, self.port),
+        ))
         raise ConnectionError(
             "TCP Connection failed to {}:{}".format(self.host, self.port)
         )
+
+    log(fstr(
+        "[MQTT-CONNECT] TCP up host={0}:{1}; sending CONNECT packet ({2} bytes)",
+        (self.host, self.port, len(build_connect(self.client_id, keep_alive))),
+    ))
 
     # MQTT Handshake (CONNECT/CONNACK)
     connect_buf = build_connect(self.client_id, keep_alive=keep_alive)
@@ -43,13 +57,37 @@ async def mqtt_connect(self: Any, keep_alive: int) -> Any:
     try:
         connack = await asyncio.wait_for(pipe.recv_n(4), timeout=4)
     except asyncio.TimeoutError as exc:
+        log(fstr(
+            "[MQTT-CONNECT] FAIL host={0}:{1} client_id={2}: CONNACK timeout "
+            "(broker accepted TCP + our CONNECT but did not respond within 4s)",
+            (self.host, self.port, self.client_id),
+        ))
         await pipe.close()
-        raise ConnectionError("conack timeout") from exc
+        raise ConnectionError(fstr(
+            "conack timeout from {0}:{1} client_id={2}",
+            (self.host, self.port, self.client_id),
+        )) from exc
 
     # Check protocol response for conack.
     if connack != b" \x02\x00\x00":
+        log(fstr(
+            "[MQTT-CONNECT] FAIL host={0}:{1} client_id={2}: bad CONNACK "
+            "{3!r} (empty bytes mean broker closed TCP after our CONNECT -- "
+            "rate-limit / blacklist / malformed-packet rejection. Non-empty "
+            "bytes that don't match would mean broker accepted but returned "
+            "an error code.)",
+            (self.host, self.port, self.client_id, connack),
+        ))
         await pipe.close()
-        raise ConnectionError("Invalid MQTT CONNACK: {}".format(connack))
+        raise ConnectionError(fstr(
+            "Invalid MQTT CONNACK from {0}:{1} client_id={2}: {3!r}",
+            (self.host, self.port, self.client_id, connack),
+        ))
+
+    log(fstr(
+        "[MQTT-CONNECT] OK host={0}:{1} client_id={2}",
+        (self.host, self.port, self.client_id),
+    ))
 
     # Message Processing Setup
     self.pipe = pipe
