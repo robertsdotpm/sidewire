@@ -79,6 +79,14 @@ async def republish_meta(
     ignore_acked: bool,
 ) -> None:
     """Republish a single queued message if its retry interval has elapsed and its lifetime has not expired."""
+    # One-shot probes (queued by MQTTClient.send_probe) are direct-
+    # published once and must NOT be retransmitted by this loop --
+    # they're time-bounded and the dispatcher's backoff+jitter would
+    # otherwise add 0-2s pre-publish delay every iteration which
+    # silently breaks discovery under concurrent probe load.
+    if meta.get("probe_one_shot"):
+        return
+
     # Message has already been acked.
     if ignore_acked:
         if meta["app_ack"].done():

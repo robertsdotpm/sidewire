@@ -97,9 +97,15 @@ async def try_client(
             log_exception()
             return None
 
-    # Probe to check if dest is on this server.
+    # Probe to check if dest is on this server. send_probe direct-
+    # publishes the PROBE bypassing the dispatcher's backoff/jitter
+    # loop -- the ordinary publish path adds 0-2s pre-publish jitter
+    # and runs at 0.5s cadence which under concurrent probe load
+    # silently exceeds probe_timeout and shrinks the discovered
+    # broker set asymmetrically (the mechanism behind the broker-
+    # set non-convergence bug).
     probe_queue_id = to_h(rand_b(32))
-    _, ack = client.queue_msg("", dest_pub_hex, probe_queue_id, MsgEnum.PROBE)
+    _, ack = await client.send_probe(dest_pub_hex, probe_queue_id)
     try:
         await asyncio.wait_for(ack, probe_timeout)
         return client

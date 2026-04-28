@@ -221,6 +221,79 @@ class MQTTClient:
         self.last_send = self.get_time()
         return ordered_ack_send(self, msg, dest_pk_hex, queue_id_hex, msg_type, seq_no)
 
+    async def send_probe(
+        self,
+        dest_pk_hex: str,
+        queue_id_hex: Optional[str] = None,
+    ) -> Tuple[Tuple[str, int], asyncio.Future]:
+        """Direct-publish a PROBE bypassing the dispatcher's backoff/jitter loop.
+
+        Probes are time-bounded: they need to leave the wire
+        immediately and fail-fast on timeout. The ordinary dispatcher
+        path (queue_msg -> ordered_ack_send -> republish_meta) is
+        designed for app-level reliable messaging where exponential
+        backoff with jitter and 60s republish_duration make sense.
+        Routing probes through it adds 0-2s pre-publish jitter and
+        a 0.5s scan cadence; under concurrent probe load that
+        compounds into multi-second startup delays which exceed the
+        try_client budget and silently shrink the discovered
+        broker set, producing the broker-set non-convergence bug
+        seen across mixed old<->modern peer pairs.
+
+        We still register the meta in msg_queues[PROBE] so that
+        process_app_ack can resolve the future when MSGACK arrives,
+        but we mark it `probe_one_shot` so republish_meta skips it
+        entirely -- the probe is sent exactly once, here.
+        """
+        queue_id_hex = queue_id_hex or to_h(rand_b(32))
+        if len(queue_id_hex) != 64:
+            raise ValueError("queue_id_hex must be 64 hex chars, got {0}".format(len(queue_id_hex)))
+        if len(dest_pk_hex) != 66:
+            raise ValueError("dest_pk_hex must be 66 hex chars, got {0}".format(len(dest_pk_hex)))
+
+        self.last_send = self.get_time()
+
+        # Register the meta the same shape as ordered_ack_send so
+        # process_app_ack's lookup keys hit. Setting probe_one_shot
+        # makes republish_meta short-circuit on the next dispatcher
+        # iteration and never republish.
+        if queue_id_hex not in self.msg_queues[MsgEnum.PROBE]:
+            self.msg_queues[MsgEnum.PROBE][queue_id_hex] = {}
+        seq_no = len(self.msg_queues[MsgEnum.PROBE][queue_id_hex])
+
+        # AppPacket pack signs and serialises the probe payload.
+        # Local import keeps mqtt_client free of a top-level dep on
+        # app_packet (mirrors what ordered_ack_send does).
+        from .app_packet import AppPacket
+        packet = AppPacket(
+            queue_id_hex=queue_id_hex,
+            seq_no=seq_no,
+            msg_type=MsgEnum.PROBE,
+            msg="",
+        )
+        out = packet.pack(self)
+
+        app_ack = asyncio.Future()
+        self.msg_queues[MsgEnum.PROBE][queue_id_hex][seq_no] = {
+            "app_ack": app_ack,
+            "dest_pk_hex": dest_pk_hex,
+            "seq_no": seq_no,
+            "out": out,
+            "updated": 0,
+            "created": self.get_time(),
+            "probe_one_shot": True,
+        }
+
+        # Build the PUBLISH packet and ship it directly. publish()
+        # also registers a PUBACK future, but we ignore it for probes
+        # -- the relevant ack is the app-level MSGACK from the dest
+        # peer (resolved via process_app_ack into app_ack above).
+        buf, _ = self.publish(dest_pk_hex, out)
+        if self.pipe and not self.pipe.on_close.is_set():
+            await self.pipe.send(buf)
+
+        return (queue_id_hex, seq_no), app_ack
+
     # Stops broadcasting a msg.
     def dequeue_msg(
         self,
