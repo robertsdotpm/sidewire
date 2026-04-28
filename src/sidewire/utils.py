@@ -35,9 +35,22 @@ def interleave_buckets(af_buckets: Dict) -> List[Dict]:
     return process_list
 
 
-def rendezvous_hash(nic: Any, pub_key_hex: str, servers: Dict) -> List[Dict]:
-    """Return an interleaved, rendezvous-scored list of servers ranked for the given public key."""
-    # We use a dict to group scores by Address Family.
+def rendezvous_hash(nic: Any, pub_key_hex: str, servers: Dict) -> Dict:
+    """Return per-AF rendezvous-scored sorted lists for the given public key.
+
+    Returns a dict {af: [servers sorted by score, best first]} with
+    one entry per AF the local NIC supports. Per-AF separation
+    matters for convergence: each peer's get_dest_clients walks the
+    per-AF sorted list independently and takes top-N per AF, so
+    two peers targeting the same pubkey converge on the SAME N
+    servers per AF deterministically (modulo each peer's own
+    connectivity to that AF). If one peer's IPv6 stack happens
+    to be flaky during selection, only their IPv6 set shrinks --
+    the IPv4 set remains intact and convergent. The previous
+    interleaved-flat-list approach let an AF failure cascade into
+    breaking the OTHER AF's convergence guarantee, which was the
+    root cause of broker-set non-convergence we kept chasing.
+    """
     af_buckets = {}
     for af in nic.supported():
         af_buckets[af] = []
@@ -54,8 +67,7 @@ def rendezvous_hash(nic: Any, pub_key_hex: str, servers: Dict) -> List[Dict]:
         # Sort each individual AF bucket by score as we finish it.
         af_buckets[af].sort(key=lambda v: v["score"])
 
-    # Final interleaving to ensure protocol diversity.
-    return interleave_buckets(af_buckets)
+    return af_buckets
 
 
 async def try_client(
@@ -119,51 +131,67 @@ async def get_dest_clients(
     n: int = 4,
     max_servers: int = 20,
 ) -> List[Any]:
-    """Discover and return up to n MQTT clients that can reach the destination public key.
+    """Discover up to n MQTT clients per AF that can reach the destination public key.
 
-    n=4 is the natural minimum: ~2 brokers per AF after interleave
-    gives every peer enough redundancy without keeping excessive
-    idle MQTT sessions. With the round-trip probe removed from
-    try_client (membership now = "I can connect+subscribe at
-    this broker"), every peer walks the deterministic rendezvous
-    ranking for the same target pubkey and converges on the same
-    broker subset automatically -- modulo each peer's own
-    connectivity, which is far more stable than the previous
-    probe-round-trip filter. n=4 should now converge cleanly.
+    Per-AF walk: each address family the local NIC supports gets
+    its own top-N from the deterministic rendezvous-scored sorted
+    list. Two peers targeting the same dest_pub_hex pick the SAME
+    top-N per AF (modulo each peer's own connectivity), so the
+    intersection between A's publish-target set and B's protected
+    set is guaranteed per-AF.
+
+    The interleaved-flat-list approach was structurally fragile:
+    when one peer's IPv6 connectivity was momentarily flaky,
+    af=23 candidates failed selection, the flat list rebalanced
+    toward IPv4 entries past rank N -- and that rebalancing
+    differed across peers, breaking convergence on the WORKING
+    AF too. Per-AF independent sampling fixes that: an IPv6
+    failure shrinks only the IPv6 set; the IPv4 set stays at
+    deterministic top-N.
+
+    Returns a flat list of clients (combined across AFs) so
+    callers (Router.protected_clients, smart_pipe) don't need to
+    change. Total returned size is up to n * len(supported AFs).
     """
-    candidate_clients = []
-    sorted_servers = rendezvous_hash(nic, dest_pub_hex, servers)
+    af_buckets = rendezvous_hash(nic, dest_pub_hex, servers)
     # server["af"] is the IANA protocol number from the INFRA database (always 10
     # for IPv6, 2 for IPv4). clients_map is keyed by the platform's socket.AF_*
     # constants, which differ on Windows (AF_INET6 = 23) vs Linux (AF_INET6 = 10).
     # Normalise via a lookup table so the key matches on all platforms.
     iana_to_af = {int(IP4): IP4, 10: IP6}
-    for server in sorted_servers:
-        af = iana_to_af.get(int(server["af"]), int(server["af"]))
-        host = server["host"]
-        if af not in clients_map or host not in clients_map[af]:
-            continue
-        client = clients_map[af][host]
-        candidate_clients.append(client)
 
-    # Process in batches of n * 2 to tolerate some servers being down without
-    # hammering the full list. Within each batch all clients run concurrently,
-    # and gather preserves order so we pick by rendezvous rank, not speed.
-    batch_size = n * 2
     found_clients = []
-    limit = min(len(candidate_clients), max_servers)
 
-    for i in range(0, limit, batch_size):
-        batch = candidate_clients[i : i + batch_size]
-        results = await asyncio.gather(
-            *[try_client(dest_pub_hex, c) for c in batch], return_exceptions=True
-        )
+    # Walk each AF bucket independently. n is the per-AF top count.
+    # batch_size keeps the connect attempts within an AF concurrent
+    # so a slow broker doesn't sequentialise the whole walk.
+    batch_size = n * 2
+    for nic_af in af_buckets:
+        sorted_servers = af_buckets[nic_af]
+        candidate_clients = []
+        for server in sorted_servers:
+            af = iana_to_af.get(int(server["af"]), int(server["af"]))
+            host = server["host"]
+            if af not in clients_map or host not in clients_map[af]:
+                continue
+            client = clients_map[af][host]
+            candidate_clients.append(client)
 
-        for client, result in zip(batch, results):
-            if result is client:
-                found_clients.append(client)
-                if len(found_clients) >= n:
-                    return found_clients
+        af_found = []
+        limit = min(len(candidate_clients), max_servers)
+        for i in range(0, limit, batch_size):
+            batch = candidate_clients[i : i + batch_size]
+            results = await asyncio.gather(
+                *[try_client(dest_pub_hex, c) for c in batch], return_exceptions=True
+            )
+            for client, result in zip(batch, results):
+                if result is client:
+                    af_found.append(client)
+                    if len(af_found) >= n:
+                        break
+            if len(af_found) >= n:
+                break
+        found_clients.extend(af_found)
 
     return found_clients
 
