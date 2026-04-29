@@ -114,6 +114,10 @@ async def try_client(
         now = client.get_time()
         if client.last_connect is not None:
             if (now - client.last_connect) < retry_duration:
+                log(fstr(
+                    "[TRY-CLIENT] host={0} rate-limited ({1:.0f}s remaining)",
+                    (client.host, retry_duration - (now - client.last_connect)),
+                ))
                 return None
         try:
             await asyncio.wait_for(client.connect(), connect_timeout)
@@ -199,8 +203,16 @@ async def get_dest_clients(
                         break
             if len(af_found) >= n:
                 break
+        log(fstr(
+            "[GET-DEST-CLIENTS] dest={0} af={1} candidates={2} found={3}",
+            (dest_pub_hex[:12], nic_af, len(candidate_clients), len(af_found)),
+        ))
         found_clients.extend(af_found)
 
+    log(fstr(
+        "[GET-DEST-CLIENTS] dest={0} total={1}",
+        (dest_pub_hex[:12], len(found_clients)),
+    ))
     return found_clients
 
 

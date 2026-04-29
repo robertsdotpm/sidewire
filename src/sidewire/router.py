@@ -32,7 +32,7 @@ code otherwise it blocks the whole program for servers it already knows are down
 import asyncio
 import time
 from typing import Any, Callable, Dict, List, Optional
-from aionetiface import AFGroup, IP4, IP6, Interface, async_wrap_errors, log_exception
+from aionetiface import AFGroup, IP4, IP6, Interface, async_wrap_errors, fstr, log, log_exception
 from .mqtt import MQTTClient
 from .smart_pipe import SmartPipe
 from .utils import get_dest_clients, get_mqtt_server_list
@@ -150,6 +150,11 @@ class Router:
             self.af_group, self.kp.public_key_hex, self.servers, self.clients
         )
 
+        log(fstr(
+            "[ROUTER-START] pub_key={0} protected_clients={1}",
+            (self.kp.public_key_hex[:12], len(clients)),
+        ))
+
         # Pin these as the protected (inbound) set. Future start() calls
         # would extend, not replace, but in practice start() is one-shot.
         for client in clients:
@@ -260,6 +265,11 @@ class Router:
         bug. Falls back to rendezvous discovery if no hints work
         (or are passed).
         """
+        log(fstr(
+            "[ROUTER-PIPE] dest={0} hint_count={1} use_cache={2}",
+            (dest_pub_hex[:12], len(hint_brokers or []), use_cache),
+        ))
+
         now = self.get_time()
         cached_clients = None  # type: Optional[List[Any]]
 
@@ -272,6 +282,11 @@ class Router:
             self, dest_pub_hex, clients=cached_clients, hint_brokers=hint_brokers,
         )
         await smart_pipe.connect()
+
+        log(fstr(
+            "[ROUTER-PIPE] dest={0} clients={1}",
+            (dest_pub_hex[:12], len(smart_pipe.clients)),
+        ))
 
         if use_cache and cached_clients is None:
             self.cache_clients(dest_pub_hex, smart_pipe.clients)

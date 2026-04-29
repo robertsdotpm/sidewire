@@ -1,6 +1,6 @@
 import asyncio
 from typing import Any, Callable, Dict, List, Optional
-from aionetiface import log_exception, rand_b, to_h
+from aionetiface import fstr, log, log_exception, rand_b, to_h
 from .utils import get_dest_clients, try_client
 
 
@@ -62,6 +62,10 @@ class SmartPipe:
             # the hint set -- the dest is guaranteed subscribed.
             if self.hint_brokers:
                 self.clients = await self.resolve_hint_clients()
+                log(fstr(
+                    "[SMARTPIPE-CONNECT] dest={0} hint_count={1} hint_clients={2}",
+                    (self.dest_pub_hex[:12], len(self.hint_brokers), len(self.clients)),
+                ))
 
             # Fall back to rendezvous discovery if hints didn't
             # produce any reachable clients.
@@ -72,6 +76,20 @@ class SmartPipe:
                     self.router.servers,
                     self.router.clients,
                 )
+                log(fstr(
+                    "[SMARTPIPE-CONNECT] dest={0} rendezvous_clients={1}",
+                    (self.dest_pub_hex[:12], len(self.clients)),
+                ))
+        else:
+            log(fstr(
+                "[SMARTPIPE-CONNECT] dest={0} cached_clients={1}",
+                (self.dest_pub_hex[:12], len(self.clients)),
+            ))
+
+        log(fstr(
+            "[SMARTPIPE-CONNECT] dest={0} total_clients={1}",
+            (self.dest_pub_hex[:12], len(self.clients)),
+        ))
 
         if msg_cb:
             for client in self.clients:
@@ -81,6 +99,10 @@ class SmartPipe:
 
     async def send(self, msg: str, timeout: int = 4) -> int:
         """Send a message to the destination, returning the byte length on success or 0 on failure."""
+        log(fstr(
+            "[SMARTPIPE-SEND] dest={0} clients={1} msg_len={2}",
+            (self.dest_pub_hex[:12], len(self.clients), len(msg)),
+        ))
         msg_id_hex = to_h(rand_b(32))
 
         tasks = []
@@ -125,6 +147,10 @@ class SmartPipe:
             for client in self.clients:
                 client.dequeue_msg(msg_id_hex)
 
+        log(fstr(
+            "[SMARTPIPE-SEND] dest={0} result=0 (no ACK from any client)",
+            (self.dest_pub_hex[:12],),
+        ))
         return 0
 
     async def close(self) -> None:
