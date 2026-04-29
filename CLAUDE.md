@@ -110,3 +110,9 @@ If pip was accidentally upgraded past 21.x on a 3.5.0 interpreter:
 python -m ensurepip
 python -m pip install "pip==20.3.4" "setuptools<50"
 ```
+
+## PNP/MQTT propagation race in node startup (cross-repo concern)
+
+p2pd-driven flows that use sidewire for routing share a propagation race documented in `p2pd/node/node_start.py`: when a node finishes startup, its PNP/MQTT registrations may not yet be visible to every server. A peer that immediately tries to resolve the new node's nickname can silently hang in the resolve step.
+
+If any sidewire-using flow is listener-then-connector, the connector MUST allow a settling window of ~8 seconds before resolving the listener's nickname. The reference implementation is `p2pd/demo/__main__.py:setup_node`.
