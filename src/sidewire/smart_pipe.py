@@ -67,7 +67,7 @@ class SmartPipe:
             # produce any reachable clients.
             if not self.clients:
                 self.clients = await get_dest_clients(
-                    self.router.nic,
+                    self.router.af_group,
                     self.dest_pub_hex,
                     self.router.servers,
                     self.router.clients,

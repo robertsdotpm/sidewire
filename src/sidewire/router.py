@@ -32,7 +32,7 @@ code otherwise it blocks the whole program for servers it already knows are down
 import asyncio
 import time
 from typing import Any, Callable, Dict, List, Optional
-from aionetiface import IP4, IP6, Interface, async_wrap_errors, log_exception
+from aionetiface import AFGroup, IP4, IP6, Interface, async_wrap_errors, log_exception
 from .mqtt import MQTTClient
 from .smart_pipe import SmartPipe
 from .utils import get_dest_clients, get_mqtt_server_list
@@ -68,6 +68,12 @@ class Router:
     ) -> None:
         """Initialize a Router with a key pair and optional server list.
 
+        nic accepts an Interface, an AFGroup, or None. A single Interface
+        is fanned across the AFs it supports; an AFGroup lets callers
+        send v4 brokers via one NIC and v6 brokers via another (mobile
+        CGNAT for v4, primary for v6, etc). None falls back to the
+        default Interface, single-stack on whatever the OS picks.
+
         get_time MUST be supplied (no implicit time.time fallback)
         so the same clock source threads through to every
         MQTTClient at construction time. See MQTTClient.__init__
@@ -82,15 +88,24 @@ class Router:
         self.kp = kp
         self.servers = servers or get_mqtt_server_list()
         self.get_time = get_time
-        self.nic = nic or Interface("default")
+        if nic is None:
+            nic = Interface("default")
+        self.af_group = AFGroup(nic) if not isinstance(nic, AFGroup) else nic
+        # Backwards-compat alias: callers / get_dest_clients still
+        # reach for self.nic. Resolves to the v4-bound Interface when
+        # the group has it, else the first Interface in the group.
+        self.nic = self.af_group.get(IP4) or self.af_group.interfaces()[0]
 
         self.clients = {IP4: {}, IP6: {}}
         self.recv_msg_ids = {}
         for af in (IP4, IP6):
+            if not self.af_group.supports(af):
+                continue
+            iface = self.af_group.for_af(af)
             for host in self.servers[af]:
                 self.clients[af][host] = MQTTClient(
                     af,
-                    self.nic,
+                    iface,
                     (host, self.servers[af][host]["port"]),
                     self.kp,
                     get_time=get_time,
@@ -132,7 +147,7 @@ class Router:
         them alone for the Router's lifetime regardless of send activity.
         """
         clients = await get_dest_clients(
-            self.nic, self.kp.public_key_hex, self.servers, self.clients
+            self.af_group, self.kp.public_key_hex, self.servers, self.clients
         )
 
         # Pin these as the protected (inbound) set. Future start() calls
