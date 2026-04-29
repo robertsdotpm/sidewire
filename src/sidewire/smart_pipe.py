@@ -128,9 +128,16 @@ class SmartPipe:
         return 0
 
     async def close(self) -> None:
-        """Close all underlying MQTT client connections."""
+        """Evict cached clients from the router; do NOT close them.
+
+        SmartPipe borrows MQTTClient instances from the Router's shared
+        pool -- it does not own them. Calling client.close() here
+        permanently poisoned those clients (is_closed stays set,
+        dispatcher exits immediately on next connect) and broke all
+        future sends through those brokers for the lifetime of the node.
+        """
         for client in self.clients:
-            await client.close()
+            self.router.evict_client_from_cache(client)
 
     async def __aenter__(self) -> "SmartPipe":
         """Connect on context manager entry."""

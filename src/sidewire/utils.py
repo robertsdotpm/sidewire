@@ -4,7 +4,9 @@ from aionetiface import (
     INFRA,
     IP4,
     IP6,
+    fstr,
     h_to_b,
+    log,
     log_exception,
     rand_b,
     rendezvous_score,
@@ -119,6 +121,12 @@ async def try_client(
             client.last_connect = now
             log_exception()
             return None
+
+    # Guard against zombie clients: dispatcher_task is non-None but the
+    # task already completed (happens when is_closed was set before the
+    # dispatcher started -- fixed in close_idle_clients, but log if seen).
+    if client.dispatcher_task is not None and client.dispatcher_task.done():
+        log(fstr("[TRY-CLIENT] host={0} zombie dispatcher_task detected (done but non-None)", (client.host,)))
 
     return client
 

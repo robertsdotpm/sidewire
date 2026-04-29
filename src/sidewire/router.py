@@ -213,10 +213,20 @@ class Router:
                 if (now - last_active) < IDLE_CLIENT_TIMEOUT:
                     continue
 
+                print("[IDLE-CLOSER] closing idle client host={0} af={1} last_active={2:.0f}s ago".format(
+                    client.host, client.af, now - last_active
+                ))
+
                 try:
                     await client.close()
                 except (OSError, ConnectionError):
                     log_exception()
+
+                # close() sets is_closed permanently, which would prevent
+                # reconnection: a new dispatcher created by a future connect()
+                # call exits immediately at its `while not is_closed.is_set()`
+                # guard. Clear it so the client is available for reuse.
+                client.is_closed.clear()
 
                 # Evict cache entries that reference this client so
                 # the next pipe() call rediscovers and reconnects

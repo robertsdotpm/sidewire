@@ -7,7 +7,7 @@ To ensure reliability, the system prioritizes running the reconnect loop first t
 import asyncio
 import random
 from typing import Any, Dict
-from aionetiface import async_wrap_errors, log_exception
+from aionetiface import async_wrap_errors, log, fstr, log_exception
 from .mqtt_connect import reconnect_loop
 from .utils import iter_all_messages, prune_msg_ids
 from .mqtt_msgs import build_ping
@@ -32,6 +32,9 @@ async def dispatcher(
 ) -> None:
     """Background loop that reconnects the pipe, republishes queued messages, and sends keep-alive pings."""
     last_ping = client.get_time()
+    if client.is_closed.is_set():
+        log(fstr("[DISPATCHER] host={0} exiting immediately: is_closed already set (idle-closer race)", (client.host,)))
+        return
     try:
         # Loop forever until is close is set or task cancelled.
         while not client.is_closed.is_set():
