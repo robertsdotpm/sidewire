@@ -28,35 +28,62 @@ class SmartPipe:
         """Connect to each hint broker (if reachable) and return matching MQTTClient instances.
 
         Walks self.hint_brokers (the destination's advertised
-        broker list) and tries to connect to each in turn. Any
+        broker list) and tries to connect to each in parallel. Any
         broker we can connect+subscribe to gets returned. The
         destination peer is GUARANTEED subscribed at these
         brokers because they came from the dest's own
         protected_clients list at addr-publish time.
+
+        Connects are run in parallel (asyncio.gather) so the total
+        latency is max(T1..Tn) not T1+T2+..+Tn.  The per-broker
+        connect_timeout is set below the outer asyncio.wait_for
+        budget in resolve_pnp_addr (10 s) so the gather always
+        completes before the outer timer can cancel it.
         """
-        out = []
+        to_try = []
         for hint in self.hint_brokers:
             af = hint.get("af")
             host = hint.get("host")
             port = hint.get("port")
             if af is None or not host or not port:
+                log(fstr("[SMARTPIPE-HINT] dest={0} malformed hint af={1} host={2}",
+                    (self.dest_pub_hex[:12], af, host)))
                 continue
             af_clients = self.router.clients.get(af, {})
             client = af_clients.get(host)
             if client is None:
-                # Hint broker isn't in our rendezvous-discovered
-                # clients_map (we never instantiated an MQTTClient
-                # for it). Skip -- if the dest is REALLY only
-                # reachable via this broker the whole convergence
-                # falls apart anyway, but that's a separate issue.
+                log(fstr(
+                    "[SMARTPIPE-HINT] dest={0} hint host={1} af={2} not in clients_map"
+                    " (known_afs={3})",
+                    (self.dest_pub_hex[:12], host, af,
+                     list(self.router.clients.keys())),
+                ))
                 continue
-            connected = await try_client(self.dest_pub_hex, client)
-            if connected is not None:
-                out.append(connected)
+            log(fstr("[SMARTPIPE-HINT] dest={0} queuing hint host={1} af={2}",
+                (self.dest_pub_hex[:12], host, af)))
+            to_try.append(client)
+
+        if not to_try:
+            log(fstr("[SMARTPIPE-HINT] dest={0} no hint clients found in clients_map",
+                (self.dest_pub_hex[:12],)))
+            return []
+
+        results = await asyncio.gather(
+            *[try_client(self.dest_pub_hex, c, connect_timeout=8) for c in to_try],
+            return_exceptions=True,
+        )
+        out = []
+        for client, result in zip(to_try, results):
+            if result is client:
+                out.append(client)
+        log(fstr("[SMARTPIPE-HINT] dest={0} tried={1} connected={2}",
+            (self.dest_pub_hex[:12], len(to_try), len(out))))
         return out
 
     async def connect(self, msg_cb: Optional[Callable] = None) -> "SmartPipe":
         """Resolve destination clients: hint brokers first, falling back to rendezvous."""
+        print("[SMARTPIPE-CONNECT] dest={0} enter clients={1} hints={2}".format(
+            self.dest_pub_hex[:12], len(self.clients), len(self.hint_brokers)))
         if not self.clients:
             # Try hint brokers first. If we get at least one, use
             # the hint set -- the dest is guaranteed subscribed.

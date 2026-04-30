@@ -110,6 +110,9 @@ async def try_client(
     only set inside the except branch, so successful (or recovered)
     connects don't poison the per-broker cache.
     """
+    log(fstr("[TRY-CLIENT] host={0} af={1} already_connected={2}",
+        (client.host, client.af,
+         client.dispatcher_task is not None and not client.dispatcher_task.done())))
     if client.dispatcher_task is None:
         now = client.get_time()
         if client.last_connect is not None:
@@ -119,6 +122,8 @@ async def try_client(
                     (client.host, retry_duration - (now - client.last_connect)),
                 ))
                 return None
+        log(fstr("[TRY-CLIENT] host={0} connecting (timeout={1}s)",
+            (client.host, connect_timeout)))
         try:
             await asyncio.wait_for(client.connect(), connect_timeout)
         except (OSError, ConnectionError, asyncio.TimeoutError):
