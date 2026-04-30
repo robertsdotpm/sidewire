@@ -127,18 +127,20 @@ class SmartPipe:
     async def send(self, msg: str, timeout: int = 4) -> int:
         """Send a message to the destination, returning the byte length on success or 0 on failure."""
         log(fstr(
-            "[SMARTPIPE-SEND] dest={0} clients={1} msg_len={2}",
-            (self.dest_pub_hex[:12], len(self.clients), len(msg)),
+            "[SMARTPIPE-SEND] dest={0} clients={1} msg_len={2} timeout={3}s",
+            (self.dest_pub_hex[:12], len(self.clients), len(msg), timeout),
         ))
         msg_id_hex = to_h(rand_b(32))
 
         tasks = []
+        client_by_task = {}  # task -> client (for broker-attribution logs)
         for client in self.clients:
             _, ack_msg = client.queue_msg(msg, self.dest_pub_hex, msg_id_hex)
             task = asyncio.create_task(
                 asyncio.wait_for(asyncio.shield(ack_msg), timeout)
             )
             tasks.append(task)
+            client_by_task[task] = client
 
         try:
             while tasks:
@@ -147,8 +149,19 @@ class SmartPipe:
                 )
 
                 for task in done:
+                    winner = client_by_task.get(task)
+                    winner_host = getattr(winner, "host", "?") if winner else "?"
                     try:
                         await task
+
+                        log(fstr(
+                            "[SMARTPIPE-SEND] dest={0} ACK from broker={1} "
+                            "(cancelling {2} other(s))",
+                            (
+                                self.dest_pub_hex[:12], winner_host,
+                                len(pending),
+                            ),
+                        ))
 
                         for p in pending:
                             p.cancel()
@@ -158,8 +171,15 @@ class SmartPipe:
                         return len(msg)
 
                     except asyncio.TimeoutError:
-                        pass
-                    except (OSError, ConnectionError):
+                        log(fstr(
+                            "[SMARTPIPE-SEND] dest={0} broker={1} TIMEOUT (no ACK)",
+                            (self.dest_pub_hex[:12], winner_host),
+                        ))
+                    except (OSError, ConnectionError) as exc:
+                        log(fstr(
+                            "[SMARTPIPE-SEND] dest={0} broker={1} ERR: {2}",
+                            (self.dest_pub_hex[:12], winner_host, repr(exc)),
+                        ))
                         log_exception()
 
                 tasks = list(pending)
