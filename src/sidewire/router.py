@@ -46,7 +46,7 @@ from .utils import get_dest_clients, get_mqtt_server_list
 # second), so closing aggressively is cheap; the broker rate-limit
 # slot freed up matters more.  Inbound subs are NEVER closed (they
 # live in protected_clients) so 5 minutes is safe for receive too.
-IDLE_CLIENT_TIMEOUT = 300
+IDLE_CLIENT_TIMEOUT = 600
 
 # How often the idle-closer wakes up to scan client.last_send. The
 # closer is cheap (just a timestamp comparison per client), so 60s is
@@ -282,8 +282,23 @@ class Router:
 
         if use_cache and dest_pub_hex in self.cache:
             entry = self.cache[dest_pub_hex]
-            if (now - entry["updated"]) < expiry:
+            age = now - entry["updated"]
+            if age < expiry:
                 cached_clients = entry["clients"]
+                log(fstr(
+                    "[ROUTER-PIPE] cache HIT dest={0} age_s={1} clients={2}",
+                    (dest_pub_hex[:12], int(age), len(cached_clients or [])),
+                ))
+            else:
+                log(fstr(
+                    "[ROUTER-PIPE] cache STALE dest={0} age_s={1} expiry_s={2}",
+                    (dest_pub_hex[:12], int(age), expiry),
+                ))
+        elif use_cache:
+            log(fstr(
+                "[ROUTER-PIPE] cache MISS dest={0} (no entry)",
+                (dest_pub_hex[:12],),
+            ))
 
         smart_pipe = SmartPipe(
             self, dest_pub_hex, clients=cached_clients, hint_brokers=hint_brokers,
