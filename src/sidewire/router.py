@@ -233,6 +233,13 @@ class Router:
                 # guard. Clear it so the client is available for reuse.
                 client.is_closed.clear()
 
+                # Reset last_send so the next idle-closer pass uses the
+                # reconnect time as the activity baseline.  Without this,
+                # last_send still holds the old (>300 s) timestamp and the
+                # idle closer would immediately re-close a freshly-reconnected
+                # client that hasn't yet sent a message.
+                client.last_send = None
+
                 # Evict cache entries that reference this client so
                 # the next pipe() call rediscovers and reconnects
                 # rather than handing back a closed-but-cached entry.
@@ -313,6 +320,10 @@ class Router:
         for af in self.clients:
             for host in self.clients[af]:
                 client = self.clients[af][host]
+                # If the idle-closer was cancelled mid-close, is_closed may
+                # be set while the dispatcher/pipe are still live.  Clear it
+                # so client.close() runs fully instead of returning early.
+                client.is_closed.clear()
                 await client.close()
 
     async def __aenter__(self) -> "Router":
