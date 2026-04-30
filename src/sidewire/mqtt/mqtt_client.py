@@ -106,8 +106,10 @@ class MQTTClient:
         # ECDSA key pair for signing high-level sequenced messages over MQTT.
         self.kp = kp
 
-        # Handle received messages.
-        self.msg_handlers = []
+        # Handle received messages. Set so add_msg_handler is idempotent --
+        # a handler attached more than once (e.g. router cache reattach +
+        # smart_pipe.connect on a reused client) doesn't fan out twice.
+        self.msg_handlers = set()
 
         # Plugin message system [enum][pipe id][seq_no] = meta
         # Used by the dispatcher task to republish messages.
@@ -157,8 +159,8 @@ class MQTTClient:
 
     # Receive back app protocol msgs unpacked.
     def add_msg_handler(self, msg_handler: Callable) -> None:
-        """Register a callback to receive decoded incoming application messages."""
-        self.msg_handlers.append(msg_handler)
+        """Register a callback to receive decoded incoming application messages (idempotent)."""
+        self.msg_handlers.add(msg_handler)
 
     # Allow awaiting on the class object directly.
     def __await__(self) -> Any:
