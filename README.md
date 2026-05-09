@@ -1,5 +1,7 @@
 # sidewire
 
+Part of the Warpgate project: <https://www.warpgate.io/>
+
 A decentralized MQTT-based signaling layer for P2P applications.
 
 sidewire routes messages between peers using rendezvous hashing over a shared pool of public MQTT brokers. Neither side needs to know which servers the other is connected to — the shared key deterministically produces the same server ordering on both ends.
