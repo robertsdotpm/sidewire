@@ -7,7 +7,6 @@ when done.
 
 import asyncio
 import random
-from typing import Any, Optional
 from aionetiface import Pipe, TCP, rand_plain, to_hs, log, fstr
 from .utils import reset_session_state
 from .mqtt_reader import mqtt_packet_reader
@@ -16,7 +15,7 @@ from .mqtt_msgs import build_connect
 
 # Connect to MQTT server, subcribe to our public key hex.
 # Setup stream-based packet reconstruction handler.
-async def mqtt_connect(self: Any, keep_alive: int) -> Any:
+async def mqtt_connect(self, keep_alive):
     """Establish a TCP connection to the MQTT broker, perform the CONNECT handshake, and subscribe to the client's public key topic."""
     # Incompatible AF.
     if self.af not in self.nic.supported():
@@ -96,7 +95,7 @@ async def mqtt_connect(self: Any, keep_alive: int) -> Any:
     self.pipe = pipe
 
     # Register the packet reader callback
-    async def handle_chunks_async(chunk: bytes, client_tup: Any, pipe: Any) -> None:
+    async def handle_chunks_async(chunk, client_tup, pipe):
         """Forward incoming TCP chunks to the MQTT packet reader for this client."""
         return await mqtt_packet_reader(self, chunk, client_tup, pipe)
 
@@ -111,7 +110,7 @@ async def mqtt_connect(self: Any, keep_alive: int) -> Any:
 
 
 # Handles the subscription to the public key topic
-async def subscribe_to_identity(self: Any, pipe: Any) -> None:
+async def subscribe_to_identity(self, pipe):
     """Subscribe the client to its own ECDSA public key hex topic and verify the SUBACK."""
     # Convert 33 byte compact pub key to hex.
     pub_hex = to_hs(self.kp.compact_public_key)
@@ -132,7 +131,7 @@ async def subscribe_to_identity(self: Any, pipe: Any) -> None:
 
 
 # Ensure a connection exists before running dispatcher.
-async def reconnect_loop(client: Any, keep_alive: int) -> Optional[bool]:
+async def reconnect_loop(client, keep_alive):
     """Continuously attempt to reconnect the client with exponential backoff until a live pipe is established."""
     attempts = 0
     while not client.is_closed.is_set():

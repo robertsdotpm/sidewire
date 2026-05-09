@@ -1,5 +1,4 @@
 import asyncio
-from typing import Any, Callable, Dict, List, Optional
 from aionetiface import fstr, log, log_exception, rand_b, to_h
 from .utils import get_dest_clients, try_client
 
@@ -9,11 +8,11 @@ class SmartPipe:
 
     def __init__(
         self,
-        router: Any,
-        dest_pub_hex: str,
-        clients: Optional[List[Any]] = None,
-        hint_brokers: Optional[List[Dict]] = None,
-    ) -> None:
+        router,
+        dest_pub_hex,
+        clients=None,
+        hint_brokers=None,
+    ):
         """Initialize a SmartPipe with a router, destination public key, optional pre-resolved clients, and optional hint brokers."""
         self.router = router
         self.dest_pub_hex = dest_pub_hex
@@ -24,7 +23,7 @@ class SmartPipe:
         # subscription is live there.
         self.hint_brokers = hint_brokers or []
 
-    async def resolve_hint_clients(self) -> List[Any]:
+    async def resolve_hint_clients(self):
         """Connect to each hint broker (if reachable) and return matching MQTTClient instances.
 
         Walks self.hint_brokers (the destination's advertised
@@ -80,7 +79,7 @@ class SmartPipe:
             (self.dest_pub_hex[:12], len(to_try), len(out))))
         return out
 
-    async def connect(self, msg_cb: Optional[Callable] = None) -> "SmartPipe":
+    async def connect(self, msg_cb=None):
         """Resolve destination clients: hint brokers first, falling back to rendezvous."""
         print("[SMARTPIPE-CONNECT] dest={0} enter clients={1} hints={2}".format(
             self.dest_pub_hex[:12], len(self.clients), len(self.hint_brokers)))
@@ -124,7 +123,7 @@ class SmartPipe:
 
         return self
 
-    async def send(self, msg: str, timeout: int = 4) -> int:
+    async def send(self, msg, timeout=4):
         """Send a message to the destination, returning the byte length on success or 0 on failure."""
         log(fstr(
             "[SMARTPIPE-SEND] dest={0} clients={1} msg_len={2} timeout={3}s",
@@ -200,7 +199,7 @@ class SmartPipe:
         ))
         return 0
 
-    async def close(self) -> None:
+    async def close(self):
         """Evict cached clients from the router; do NOT close them.
 
         SmartPipe borrows MQTTClient instances from the Router's shared
@@ -212,12 +211,12 @@ class SmartPipe:
         for client in self.clients:
             self.router.evict_client_from_cache(client)
 
-    async def __aenter__(self) -> "SmartPipe":
+    async def __aenter__(self):
         """Connect on context manager entry."""
         await self.connect()
         return self
 
-    async def __aexit__(self, *_: Any) -> bool:
+    async def __aexit__(self, *_):
         """Close on context manager exit."""
         await self.close()
         return False

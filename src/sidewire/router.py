@@ -31,7 +31,6 @@ code otherwise it blocks the whole program for servers it already knows are down
 
 import asyncio
 import time
-from typing import Any, Callable, Dict, List, Optional
 from aionetiface import AFGroup, IP4, IP6, Interface, async_wrap_errors, fstr, log, log_exception
 from .mqtt import MQTTClient
 from .smart_pipe import SmartPipe
@@ -60,12 +59,12 @@ class Router:
 
     def __init__(
         self,
-        kp: Any,
-        msg_handler: Optional[Callable] = None,
-        get_time: Optional[Callable[[], float]] = None,
-        nic: Any = None,
-        servers: Optional[Dict] = None,
-    ) -> None:
+        kp,
+        msg_handler=None,
+        get_time=None,
+        nic=None,
+        servers=None,
+    ):
         """Initialize a Router with a key pair and optional server list.
 
         nic accepts an Interface, an AFGroup, or None. A single Interface
@@ -133,13 +132,13 @@ class Router:
         # can be called repeatedly without raising.
         self.idle_closer_task = None
 
-    def add_msg_handler(self, msg_handler: Callable) -> None:
+    def add_msg_handler(self, msg_handler):
         """Register a message handler on all managed MQTT clients."""
         for af in self.clients:
             for host in self.clients[af]:
                 self.clients[af][host].add_msg_handler(msg_handler)
 
-    async def start(self) -> List[Any]:
+    async def start(self):
         """Connect to the best MQTT servers for this node's own public key.
 
         The clients returned here form the *first loaded group* -- they
@@ -172,7 +171,7 @@ class Router:
 
         return clients
 
-    async def idle_closer_loop(self) -> None:
+    async def idle_closer_loop(self):
         """Periodically close MQTT clients that haven't been used to send.
 
         Walks self.clients every IDLE_CLIENT_INTERVAL and closes any
@@ -194,7 +193,7 @@ class Router:
             except (OSError, ConnectionError):
                 log_exception()
 
-    async def close_idle_clients(self) -> None:
+    async def close_idle_clients(self):
         """One pass of the idle-closer; exposed for tests + manual triggers."""
         now = self.get_time()
         for af in self.clients:
@@ -245,7 +244,7 @@ class Router:
                 # rather than handing back a closed-but-cached entry.
                 self.evict_client_from_cache(client)
 
-    def evict_client_from_cache(self, client: Any) -> None:
+    def evict_client_from_cache(self, client):
         """Drop any cache entry whose client list contains *client*."""
         stale_keys = []
         for pub_key_hex, entry in self.cache.items():
@@ -256,11 +255,11 @@ class Router:
 
     async def pipe(
         self,
-        dest_pub_hex: str,
-        use_cache: bool = False,
-        expiry: int = 3600,
-        hint_brokers: Optional[List[Dict]] = None,
-    ) -> SmartPipe:
+        dest_pub_hex,
+        use_cache=False,
+        expiry=3600,
+        hint_brokers=None,
+    ):
         """Create a SmartPipe to the destination, performing rendezvous discovery if needed.
 
         hint_brokers is an optional list of {af, host, port} dicts
@@ -315,12 +314,12 @@ class Router:
 
         return smart_pipe
 
-    def cache_clients(self, pub_key_hex: str, clients: List[Any]) -> None:
+    def cache_clients(self, pub_key_hex, clients):
         """Store a client list in the discovery cache for the given public key."""
         now = self.get_time()
         self.cache[pub_key_hex] = {"updated": now, "clients": clients}
 
-    async def close(self) -> None:
+    async def close(self):
         """Close all managed MQTT client connections."""
         # Stop the idle closer first so it can't race a client.close()
         # below and double-fire on the same socket.
@@ -341,12 +340,12 @@ class Router:
                 client.is_closed.clear()
                 await client.close()
 
-    async def __aenter__(self) -> "Router":
+    async def __aenter__(self):
         """Start the router on context manager entry."""
         await self.start()
         return self
 
-    async def __aexit__(self, *_: Any) -> bool:
+    async def __aexit__(self, *_):
         """Close all connections on context manager exit."""
         await self.close()
         return False

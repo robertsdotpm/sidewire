@@ -21,20 +21,19 @@ meta:
 
 import asyncio
 import hashlib
-from typing import Optional, Tuple, Any
 from aionetiface import log, to_b
 from .mqtt_defs import MsgEnum
 from .app_packet import AppPacket
 
 
 def ordered_ack_send(
-    client: Any,
-    msg: str,
-    dest_pk_hex: str,
-    queue_id_hex: str,
-    msg_type: MsgEnum = MsgEnum.MSG,
-    seq_no: Optional[int] = None,
-) -> Tuple[Tuple[str, int], asyncio.Future]:
+    client,
+    msg,
+    dest_pk_hex,
+    queue_id_hex,
+    msg_type=MsgEnum.MSG,
+    seq_no=None,
+):
     """Queue a signed application message for ordered delivery to dest_pk_hex.
 
     Returns a (queue_id_hex, seq_no) key and a Future resolved when the

@@ -1,5 +1,4 @@
 import struct
-from typing import Any, Optional
 from ecdsa import VerifyingKey, SECP256k1, util, BadSignatureError, MalformedPointError
 from aionetiface import h_to_b, to_b, to_h, to_s
 
@@ -37,14 +36,14 @@ class AppPacket:
 
     def __init__(
         self,
-        src_pk_hex: Optional[str] = None,
-        sig_hex: Optional[str] = None,
-        queue_id_hex: Optional[str] = None,
-        seq_no: Optional[int] = None,
-        timestamp: Optional[int] = None,
-        msg_type: Optional[int] = None,
-        msg: Optional[str] = None,
-    ) -> None:
+        src_pk_hex=None,
+        sig_hex=None,
+        queue_id_hex=None,
+        seq_no=None,
+        timestamp=None,
+        msg_type=None,
+        msg=None,
+    ):
         """Initialize an AppPacket with optional field values."""
         self.src_pk_hex = src_pk_hex
         self.sig_hex = sig_hex
@@ -55,20 +54,20 @@ class AppPacket:
         self.msg = msg
 
     @property
-    def seq_no_hex(self) -> Optional[str]:
+    def seq_no_hex(self):
         """Formats the integer sequence number into an 8-char hex string."""
         if self.seq_no is None:
             return None
         return "{:08x}".format(self.seq_no)
 
     @property
-    def timestamp_hex(self) -> Optional[str]:
+    def timestamp_hex(self):
         """Formats the unix timestamp into a 16-char hex string."""
         if self.timestamp is None:
             return None
         return "{:016x}".format(self.timestamp)
 
-    def pack(self, client: Any) -> bytes:
+    def pack(self, client):
         """Serialize the signed packet to bytes using fixed-width binary framing."""
         if len(self.queue_id_hex) != 64:
             raise ValueError(
@@ -102,7 +101,7 @@ class AppPacket:
         return compact_pk + sig + signed_msg
 
     @classmethod
-    def unpack(cls, payload: bytes) -> Optional["AppPacket"]:
+    def unpack(cls, payload):
         """Parse and verify a packed AppPacket wire buffer, returning None on any error."""
         if not isinstance(payload, (bytes, bytearray)):
             return None

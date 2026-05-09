@@ -44,7 +44,6 @@ Everything ended up under 700 lines of code which I think is pretty good!
 import hashlib
 import asyncio
 import time
-from typing import Any, Callable, Optional, Tuple
 from aionetiface import (
     IP4,
     Interface,
@@ -72,12 +71,12 @@ class MQTTClient:
 
     def __init__(
         self,
-        af: Any,
-        nic: Any,
-        dest: Tuple[str, int],
-        kp: Any,
-        get_time: Optional[Callable[[], float]] = None,
-    ) -> None:
+        af,
+        nic,
+        dest,
+        kp,
+        get_time=None,
+    ):
         """Initialize an MQTTClient with network, destination, and key-pair settings.
 
         get_time MUST be supplied (no implicit time.time fallback).
@@ -158,12 +157,12 @@ class MQTTClient:
         self.last_send = None
 
     # Receive back app protocol msgs unpacked.
-    def add_msg_handler(self, msg_handler: Callable) -> None:
+    def add_msg_handler(self, msg_handler):
         """Register a callback to receive decoded incoming application messages (idempotent)."""
         self.msg_handlers.add(msg_handler)
 
     # Allow awaiting on the class object directly.
-    def __await__(self) -> Any:
+    def __await__(self):
         """Allow the client to be directly awaited as a shorthand for connect()."""
         return self.connect().__await__()
 
@@ -171,13 +170,13 @@ class MQTTClient:
     # Also will start a background task that dispatches messages from self.send.
     async def connect(
         self,
-        republish_duration: int = 60,
-        interval: int = 2,
-        keep_alive: int = MQTT_KEEP_ALIVE,
-        ignore_acked: bool = False,
-        reconnect_delay: int = 0,
-        timeout: int = 4,
-    ) -> Any:
+        republish_duration=60,
+        interval=2,
+        keep_alive=MQTT_KEEP_ALIVE,
+        ignore_acked=False,
+        reconnect_delay=0,
+        timeout=4,
+    ):
         """Connect to the MQTT server and start the background message dispatcher."""
         # Re-entry guard.
         if self.dispatcher_task:
@@ -214,7 +213,7 @@ class MQTTClient:
 
     # Internal: used to subscribe to own pub key hex.
     # Returns packet and future to await ack for the packet from the server.
-    def subscribe(self, topic: str) -> Tuple[bytes, asyncio.Future]:
+    def subscribe(self, topic):
         """Build a SUBSCRIBE packet and return it with a future for the server SUBACK."""
         if not isinstance(topic, str):
             raise TypeError("topic must be str, got {}".format(type(topic).__name__))
@@ -227,12 +226,12 @@ class MQTTClient:
     # A background dispatcher task loops over these queues to repub messages.
     def queue_msg(
         self,
-        msg: str,
-        dest_pk_hex: str,
-        queue_id_hex: Optional[str] = None,
-        msg_type: MsgEnum = MsgEnum.MSG,
-        seq_no: Optional[int] = None,
-    ) -> Tuple[Tuple[str, int], asyncio.Future]:
+        msg,
+        dest_pk_hex,
+        queue_id_hex=None,
+        msg_type=MsgEnum.MSG,
+        seq_no=None,
+    ):
         """Queue a signed message for reliable delivery to the given destination public key."""
         queue_id_hex = queue_id_hex or to_h(rand_b(32))
         # Track activity so the Router idle-closer can leave busy
@@ -246,9 +245,9 @@ class MQTTClient:
 
     async def send_probe(
         self,
-        dest_pk_hex: str,
-        queue_id_hex: Optional[str] = None,
-    ) -> Tuple[Tuple[str, int], asyncio.Future]:
+        dest_pk_hex,
+        queue_id_hex=None,
+    ):
         """Direct-publish a PROBE bypassing the dispatcher's backoff/jitter loop.
 
         Probes are time-bounded: they need to leave the wire
@@ -319,10 +318,10 @@ class MQTTClient:
 
     async def send_probe_ack(
         self,
-        dest_pk_hex: str,
-        queue_id_hex: str,
-        seq_no: int,
-    ) -> None:
+        dest_pk_hex,
+        queue_id_hex,
+        seq_no,
+    ):
         """Direct-publish a MSGACK in response to an inbound PROBE.
 
         Mirror image of send_probe for the receiver side. The
@@ -377,10 +376,10 @@ class MQTTClient:
     # Stops broadcasting a msg.
     def dequeue_msg(
         self,
-        queue_id_hex: str,
-        seq_no: Optional[int] = None,
-        msg_type: MsgEnum = MsgEnum.MSG,
-    ) -> None:
+        queue_id_hex,
+        seq_no=None,
+        msg_type=MsgEnum.MSG,
+    ):
         """Stop retransmitting a queued message, optionally scoped to a sequence number."""
         # Get queue by queue id.
         queue = self.msg_queues[msg_type]
@@ -406,8 +405,8 @@ class MQTTClient:
     # Internal: used to publish signed messages to pub key hashed topics.
     # Returns packet and future to await ack for the packet from the server.
     def publish(
-        self, topic: str, payload: bytes, dup: bool = False
-    ) -> Tuple[bytes, asyncio.Future]:
+        self, topic, payload, dup=False
+    ):
         """Build a PUBLISH packet and return it with a future for the broker PUBACK."""
         if not is_ascii(topic):
             raise ValueError("topic must be ASCII")
@@ -418,7 +417,7 @@ class MQTTClient:
         return buf, packet_ack
 
     # Cleanly disconnect from MQTT server.
-    async def close(self) -> None:
+    async def close(self):
         """Cleanly shut down the dispatcher, send DISCONNECT, and close the pipe."""
         # Already closed.
         if self.is_closed.is_set():
@@ -446,17 +445,17 @@ class MQTTClient:
             await self.pipe.close()
             self.pipe = None
 
-    async def __aenter__(self) -> "MQTTClient":
+    async def __aenter__(self):
         """Connect on context manager entry."""
         await self.connect()
         return self
 
-    async def __aexit__(self, *_: Any) -> bool:
+    async def __aexit__(self, *_):
         """Close on context manager exit."""
         await self.close()
         return False
 
-    async def ping_handler(self) -> None:
+    async def ping_handler(self):
         """Handle a PINGRESP from the server.
 
         MQTT keepalive is confirmed purely by receipt of the PINGRESP, so
@@ -466,13 +465,13 @@ class MQTTClient:
         return
 
 
-async def demo_mqtt() -> None:
+async def demo_mqtt():
     """Demo: connect two clients (Alice and Bob) and send a message."""
     nic = Interface("default")
 
     async def msg_handler(
-        msg: str, src_pk_hex: str, queue_id_hex: str, client: Any
-    ) -> None:
+        msg, src_pk_hex, queue_id_hex, client
+    ):
         """Print the received message, sender public key, and queue ID during the demo."""
         print("msg handler got ", msg, " ", src_pk_hex, " ", queue_id_hex)
 

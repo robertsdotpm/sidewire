@@ -1,4 +1,3 @@
-from typing import Any
 from aionetiface import async_wrap_errors
 from .mqtt_packet import mqtt_decode_varint, mqtt_parse_packet
 from .mqtt_proto import handle_mqtt_packet
@@ -6,8 +5,8 @@ from .mqtt_proto import handle_mqtt_packet
 
 # TCP streaming protocol handler for MQTT.
 async def mqtt_packet_reader(
-    client: Any, chunk: bytes, client_tup: Any, pipe: Any
-) -> None:
+    client, chunk, client_tup, pipe
+):
     """Buffer incoming TCP data and dispatch complete MQTT packets to the protocol handler."""
     # Nothing received, end.
     if not chunk:

@@ -9,8 +9,6 @@ the MQTT protocol possible:
     - ping responses from the server
     - eventually disconnects
 """
-
-from typing import Any
 from aionetiface import h_to_b, log, fstr
 from .mqtt_defs import MQTTEnum, MsgEnum
 from .mqtt_packet import mqtt_parse_publish
@@ -20,7 +18,7 @@ from .mqtt_msgs import build_puback
 
 
 # mqtt_packet_reader sends full packets to this func to handle.
-async def handle_mqtt_packet(client: Any, packet: Any) -> None:
+async def handle_mqtt_packet(client, packet):
     """Dispatch a fully assembled MQTT packet to the appropriate handler based on its type."""
     # MQTT server acks a publish or a channel subscribe.
     if packet.type in (MQTTEnum.PUBACK, MQTTEnum.SUBACK):
@@ -40,7 +38,7 @@ async def handle_mqtt_packet(client: Any, packet: Any) -> None:
 # The future is resolved for acks back from server. Currently, since
 # the software uses app-level ACKS no packet-level awaits are used for
 # these futures but acking here does mean the packet ID should be freed.
-async def handle_broker_ack(client: Any, packet: Any) -> None:
+async def handle_broker_ack(client, packet):
     """Resolve the pending Future for a PUBACK or SUBACK packet and free its packet ID."""
     # Extract packet ID from packet.
     packet_id = packet.body[:2]
@@ -68,7 +66,7 @@ async def handle_broker_ack(client: Any, packet: Any) -> None:
 # Handles receiving a new message for our ECDSA pub hex topic sub.
 # Messages fall into either acks for a past message or new messages.
 # The software validates signatures and sets futures for acks.
-async def handle_publish(client: Any, packet: Any) -> None:
+async def handle_publish(client, packet):
     """Validate, authenticate, and route an inbound PUBLISH packet to the correct application handler."""
     # Publish-specific function for parsing a packet.
     parsed = mqtt_parse_publish(packet)

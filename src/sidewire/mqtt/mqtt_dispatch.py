@@ -6,7 +6,6 @@ To ensure reliability, the system prioritizes running the reconnect loop first t
 
 import asyncio
 import random
-from typing import Any, Dict
 from aionetiface import async_wrap_errors, log, fstr, log_exception
 from .mqtt_connect import reconnect_loop
 from .utils import iter_all_messages, prune_msg_ids
@@ -14,7 +13,7 @@ from .mqtt_msgs import build_ping
 
 
 # Cleanup handled by mqtt_client.close.
-async def safe_pipe_send(client: Any, buf: bytes) -> bool:
+async def safe_pipe_send(client, buf):
     """Send bytes on the client pipe only if it is open, returning True on success."""
     if not client.pipe or client.pipe.on_close.is_set():
         return False
@@ -23,13 +22,13 @@ async def safe_pipe_send(client: Any, buf: bytes) -> bool:
 
 
 async def dispatcher(
-    client: Any,
-    republish_duration: int,
-    interval: int,
-    keep_alive: int,
-    ignore_acked: bool = False,
-    reconnect_delay: int = 0,
-) -> None:
+    client,
+    republish_duration,
+    interval,
+    keep_alive,
+    ignore_acked=False,
+    reconnect_delay=0,
+):
     """Background loop that reconnects the pipe, republishes queued messages, and sends keep-alive pings."""
     last_ping = client.get_time()
     if client.is_closed.is_set():
@@ -74,13 +73,13 @@ async def dispatcher(
 
 
 async def republish_meta(
-    client: Any,
-    meta: Dict,
-    now: float,
-    interval: int,
-    republish_duration: int,
-    ignore_acked: bool,
-) -> None:
+    client,
+    meta,
+    now,
+    interval,
+    republish_duration,
+    ignore_acked,
+):
     """Republish a single queued message if its retry interval has elapsed and its lifetime has not expired."""
     # One-shot probes (queued by MQTTClient.send_probe) are direct-
     # published once and must NOT be retransmitted by this loop --

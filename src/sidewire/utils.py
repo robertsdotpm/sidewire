@@ -1,5 +1,4 @@
 import asyncio
-from typing import Any, Dict, List, Optional
 from aionetiface import (
     INFRA,
     IP4,
@@ -16,12 +15,12 @@ from aionetiface import (
 from .mqtt.mqtt_defs import MsgEnum
 
 
-def get_server_score(af: Any, host: str, pub_key_hex: str) -> Any:
+def get_server_score(af, host, pub_key_hex):
     """Compute the rendezvous score for a server given an address family, host, and public key."""
     return rendezvous_score(bytes([int(af)]), h_to_b(pub_key_hex), to_b(host))
 
 
-def interleave_buckets(af_buckets: Dict) -> List[Dict]:
+def interleave_buckets(af_buckets):
     """
     Interleaves the results to guarantee diversity in the top N.
     This ensures IPv4 and IPv6 servers both appear at the start of the list.
@@ -37,7 +36,7 @@ def interleave_buckets(af_buckets: Dict) -> List[Dict]:
     return process_list
 
 
-def rendezvous_hash(nic: Any, pub_key_hex: str, servers: Dict) -> Dict:
+def rendezvous_hash(nic, pub_key_hex, servers):
     """Return per-AF rendezvous-scored sorted lists for the given public key.
 
     Returns a dict {af: [servers sorted by score, best first]} with
@@ -73,11 +72,11 @@ def rendezvous_hash(nic: Any, pub_key_hex: str, servers: Dict) -> Dict:
 
 
 async def try_client(
-    dest_pub_hex: str,
-    client: Any,
-    connect_timeout: int = 15,
-    retry_duration: int = 1200,
-) -> Optional[Any]:
+    dest_pub_hex,
+    client,
+    connect_timeout=15,
+    retry_duration=1200,
+):
     """Return client if we can connect+subscribe to its broker, else None.
 
     No round-trip probe. The previous implementation sent a PROBE
@@ -141,13 +140,13 @@ async def try_client(
 
 
 async def get_dest_clients(
-    nic: Any,
-    dest_pub_hex: str,
-    servers: Dict,
-    clients_map: Dict,
-    n: int = 4,
-    max_servers: int = 20,
-) -> List[Any]:
+    nic,
+    dest_pub_hex,
+    servers,
+    clients_map,
+    n=4,
+    max_servers=20,
+):
     """Discover up to n MQTT clients per AF that can reach the destination public key.
 
     Per-AF walk: each address family the local NIC supports gets
@@ -221,7 +220,7 @@ async def get_dest_clients(
     return found_clients
 
 
-def get_mqtt_server_list(from_infra: Any = INFRA["MQTT"]) -> Dict:
+def get_mqtt_server_list(from_infra=INFRA["MQTT"]):
     """Parse the INFRA MQTT server list into a dict keyed by address family and hostname."""
     af_map = {"IPv4": IP4, "IPv6": IP6}
     servers = {IP4: {}, IP6: {}}

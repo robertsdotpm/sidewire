@@ -1,5 +1,4 @@
 import struct
-from typing import Any, Optional, Tuple
 from aionetiface import to_s
 from .mqtt_defs import MQTTEnum
 from .utils import mqtt_decode_varint, mqtt_encode_varint, mqtt_enc_str
@@ -8,7 +7,7 @@ from .utils import mqtt_decode_varint, mqtt_encode_varint, mqtt_enc_str
 class MQTTPacket:
     """Represent a single MQTT control packet with header and body."""
 
-    def __init__(self, packet_type: Any, flags: int = 0) -> None:
+    def __init__(self, packet_type, flags=0):
         """Initialize an MQTTPacket with the given type and flags."""
         self.type = MQTTEnum(packet_type)
         self.flags = flags
@@ -16,22 +15,22 @@ class MQTTPacket:
         self.payload = b""
         self.body = b""
 
-    def set_variable_header(self, data: Any) -> None:
+    def set_variable_header(self, data):
         """Set the variable header from an int (packed as big-endian short) or bytes."""
         if isinstance(data, int):
             self.variable_header = struct.pack("!H", data)
         else:
             self.variable_header = data
 
-    def set_payload(self, data: bytes) -> None:
+    def set_payload(self, data):
         """Set the packet payload bytes."""
         self.payload = data
 
-    def set_packet_id(self, packet_id: int) -> None:
+    def set_packet_id(self, packet_id):
         """Set the variable header to a big-endian encoded packet ID."""
         self.variable_header = struct.pack("!H", packet_id)
 
-    def build(self) -> bytes:
+    def build(self):
         """Serialize the packet to bytes including fixed header and body."""
         body = self.variable_header + self.payload
         fixed = mqtt_build_header(len(body), self.type, self.flags)
@@ -39,7 +38,7 @@ class MQTTPacket:
         return fixed + body
 
 
-def mqtt_parse_packet(raw: bytes) -> "MQTTPacket":
+def mqtt_parse_packet(raw):
     """Parse raw bytes into an MQTTPacket, leaving the body unparsed."""
     offset = 0
 
@@ -64,7 +63,7 @@ def mqtt_parse_packet(raw: bytes) -> "MQTTPacket":
     return pkt
 
 
-def mqtt_build_header(remaining_length: int, packet_type: Any, flags: int) -> bytes:
+def mqtt_build_header(remaining_length, packet_type, flags):
     """Build the MQTT fixed header bytes for the given packet type, flags, and remaining length."""
     packet_type_part = int(packet_type) << 4
     flags_part = flags & 0x0F
@@ -72,7 +71,7 @@ def mqtt_build_header(remaining_length: int, packet_type: Any, flags: int) -> by
     return bytes([first_byte]) + mqtt_encode_varint(remaining_length)
 
 
-def mqtt_parse_puback(packet: "MQTTPacket") -> Optional[bytes]:
+def mqtt_parse_puback(packet):
     """
     Parses a PUBACK packet to extract the 2-byte Packet ID.
     Expected packet.body is usually the 2-byte Variable Header.
@@ -89,8 +88,8 @@ def mqtt_parse_puback(packet: "MQTTPacket") -> Optional[bytes]:
 
 
 def mqtt_parse_publish(
-    packet: "MQTTPacket",
-) -> Optional[Tuple[str, bytes, Optional[bytes]]]:
+    packet,
+):
     """Parse a PUBLISH packet body into (topic, payload, packet_id); returns None on malformed input."""
     body = packet.body
     offset = 0

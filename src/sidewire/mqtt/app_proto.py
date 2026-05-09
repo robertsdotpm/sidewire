@@ -1,12 +1,11 @@
 import hashlib
-from typing import Any
 from aionetiface import async_wrap_errors, log_exception, to_b
 from .mqtt_defs import MsgEnum
 from .utils import get_msg_from_queue
 
 
 # Function called for new application (type=msg) publishes.
-async def process_app_msg(client: Any, app_packet: Any) -> None:
+async def process_app_msg(client, app_packet):
     """Deliver a received application message to registered handlers and enqueue an ACK back to the sender."""
     # Using the integer directly from the object.
     seq_no = app_packet.seq_no
@@ -64,7 +63,7 @@ async def process_app_msg(client: Any, app_packet: Any) -> None:
 
 # Function called for new application (type=probe) publishes.
 # ACKs the sender so discovery works, but never calls user handlers.
-async def process_app_probe(client: Any, app_packet: Any) -> None:
+async def process_app_probe(client, app_packet):
     """Respond to a probe packet with a direct-published ACK.
 
     The probe round-trip is time-bounded: the originator's
@@ -108,7 +107,7 @@ async def process_app_probe(client: Any, app_packet: Any) -> None:
         log_exception()
 
 
-def process_app_ack(client: Any, app_packet: Any) -> None:
+def process_app_ack(client, app_packet):
     """Resolve the outstanding Future for a message when its application-level ACK arrives."""
     # Pull fields directly from the object
     queue_id = app_packet.queue_id_hex
