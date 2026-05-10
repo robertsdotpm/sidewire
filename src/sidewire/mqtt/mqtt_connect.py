@@ -106,6 +106,7 @@ async def mqtt_connect(self, keep_alive):
     try:
         await subscribe_to_identity(self, pipe)
     except BaseException:
+        self.pipe = None
         try:
             await pipe.close()
         except Exception:
