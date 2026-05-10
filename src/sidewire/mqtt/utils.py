@@ -87,7 +87,7 @@ def reset_session_state(client):
         for seq_no in client.packet_ids[packet_type]:
             future = client.packet_ids[packet_type][seq_no]
             if not future.done():
-                future.set_exception(ConnectionError("Connection lost for packet ACK"))
+                future.cancel()
 
         # Fresh list of type id futures.
         client.packet_ids[packet_type] = {}
