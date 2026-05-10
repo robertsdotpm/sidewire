@@ -72,7 +72,7 @@ async def dispatcher(
                 await safe_pipe_send(client, ping_buf)
                 prune_msg_ids(client, now)
     except asyncio.CancelledError:
-        pass
+        raise
     except (OSError, ConnectionError, asyncio.TimeoutError):
         log_exception()
 
