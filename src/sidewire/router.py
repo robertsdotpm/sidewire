@@ -85,6 +85,19 @@ class Router:
                 "not time.time directly)"
             )
         self.kp = kp
+        # Normalize kp: accept namebump.Keypair (attrs: vkc, private, public)
+        # in addition to aionetiface.Signing (attrs: compact_public_key,
+        # public_key_hex, private_key, public_key). Keypair lacks the
+        # Signing-named attrs that mqtt_connect, mqtt_proto, and app_packet
+        # access, so add them on the kp object once at construction time.
+        if not hasattr(kp, "compact_public_key"):
+            kp.compact_public_key = kp.vkc
+        if not hasattr(kp, "public_key_hex"):
+            kp.public_key_hex = kp.vkc.hex()
+        if not hasattr(kp, "private_key"):
+            kp.private_key = getattr(kp, "private", None)
+        if not hasattr(kp, "public_key"):
+            kp.public_key = getattr(kp, "public", None)
         self.servers = servers or get_mqtt_server_list()
         self.get_time = get_time
         if nic is None:
