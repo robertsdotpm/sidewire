@@ -417,6 +417,11 @@ class MQTTClient:
         return buf, packet_ack
 
     # Cleanly disconnect from MQTT server.
+    def reset_session_state(self):
+        """Clear in-flight packet tracking and message-id tables for a fresh session."""
+        self.packet_ids = {MQTTEnum.SUBACK: {}, MQTTEnum.PUBACK: {}}
+        self.sent_msg_ids = {}
+
     async def close(self):
         """Cleanly shut down the dispatcher, send DISCONNECT, and close the pipe."""
         # Already closed.

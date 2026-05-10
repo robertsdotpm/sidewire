@@ -42,7 +42,12 @@ async def dispatcher(
                 await asyncio.sleep(reconnect_delay)
 
             # Ensure pipe is alive before attempting to send.
-            await reconnect_loop(client, keep_alive)
+            try:
+                await reconnect_loop(client, keep_alive)
+            except (OSError, ConnectionError, asyncio.TimeoutError):
+                log_exception()
+                await asyncio.sleep(1)
+                continue
 
             # Process all messages in the queues.
             now = client.get_time()

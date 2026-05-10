@@ -232,6 +232,11 @@ class Router:
                 # guard. Clear it so the client is available for reuse.
                 client.is_closed.clear()
 
+                # Drop in-flight packet futures from the closed session so
+                # wrapping 16-bit packet IDs on the next session can't
+                # accidentally resolve a stale future from the old one.
+                client.reset_session_state()
+
                 # Reset last_send so the next idle-closer pass uses the
                 # reconnect time as the activity baseline.  Without this,
                 # last_send still holds the old (>300 s) timestamp and the
