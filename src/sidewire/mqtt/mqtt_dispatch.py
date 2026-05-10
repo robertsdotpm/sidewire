@@ -26,7 +26,7 @@ async def dispatcher(
     republish_duration,
     interval,
     keep_alive,
-    ignore_acked=False,
+    ignore_acked=True,
     reconnect_delay=0,
 ):
     """Background loop that reconnects the pipe, republishes queued messages, and sends keep-alive pings."""
