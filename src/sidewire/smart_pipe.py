@@ -134,7 +134,11 @@ class SmartPipe:
         tasks = []
         client_by_task = {}  # task -> client (for broker-attribution logs)
         for client in self.clients:
-            _, ack_msg = client.queue_msg(msg, self.dest_pub_hex, msg_id_hex)
+            try:
+                _, ack_msg = client.queue_msg(msg, self.dest_pub_hex, msg_id_hex)
+            except Exception:
+                log_exception()
+                continue
             task = asyncio.create_task(
                 asyncio.wait_for(asyncio.shield(ack_msg), timeout)
             )
