@@ -179,7 +179,7 @@ class MQTTClient:
     ):
         """Connect to the MQTT server and start the background message dispatcher."""
         # Re-entry guard.
-        if self.dispatcher_task:
+        if self.dispatcher_task and not self.dispatcher_task.done():
             log(fstr("[MQTT-CLIENT-CONNECT] host={0} re-entry: dispatcher already running (task_done={1})", (self.host, self.dispatcher_task.done())))
             return self.pipe
 

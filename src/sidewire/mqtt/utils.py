@@ -71,7 +71,9 @@ def iter_all_messages(msg_queues):
             # Messages are further indexed by sequence (order.)
             queue = msg_queues[msg_type][queue_id_hex]
             for seq_no in sorted(queue.keys()):
-                yield queue[seq_no]
+                meta = queue.get(seq_no)
+                if meta is not None:
+                    yield meta
 
 
 # Resets protocol-level state for a fresh connection.
