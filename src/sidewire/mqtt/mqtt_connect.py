@@ -103,7 +103,14 @@ async def mqtt_connect(self, keep_alive):
     pipe.add_msg_cb(handle_chunks_async)
 
     # Public Key Subscription
-    await subscribe_to_identity(self, pipe)
+    try:
+        await subscribe_to_identity(self, pipe)
+    except BaseException:
+        try:
+            await pipe.close()
+        except Exception:
+            pass
+        raise
 
     # Return connected pipe.
     return pipe
