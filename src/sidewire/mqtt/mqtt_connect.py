@@ -164,6 +164,6 @@ async def reconnect_loop(client, keep_alive):
         # Exponential backoff with jitter: 1s, 2s, 4s, ... capped at 60s.
         cap = min(2**attempts, 60)
         delay = random.uniform(0, cap)
-        log(fstr("[RECONNECT] host={0} attempt={1} backoff={2:.1f}s", (client.host, attempts, delay)))
+        log(fstr("[RECONNECT] host={0} attempt={1} backoff={2}s", (client.host, attempts, "{:.1f}".format(delay))))
         await asyncio.sleep(delay)
         attempts += 1
