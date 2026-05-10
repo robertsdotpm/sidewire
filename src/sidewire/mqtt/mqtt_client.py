@@ -419,6 +419,10 @@ class MQTTClient:
     # Cleanly disconnect from MQTT server.
     def reset_session_state(self):
         """Clear in-flight packet tracking and message-id tables for a fresh session."""
+        for futs in self.packet_ids.values():
+            for fut in futs.values():
+                if not fut.done():
+                    fut.cancel()
         self.packet_ids = {MQTTEnum.SUBACK: {}, MQTTEnum.PUBACK: {}}
         self.sent_msg_ids = {}
 

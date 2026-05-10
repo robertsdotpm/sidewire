@@ -178,7 +178,7 @@ class Router:
         # we know which clients are protected. Otherwise an early tick
         # could see an empty protected set and close everything.
         if self.idle_closer_task is None or self.idle_closer_task.done():
-            self.idle_closer_task = asyncio.ensure_future(
+            self.idle_closer_task = asyncio.create_task(
                 async_wrap_errors(self.idle_closer_loop())
             )
 
