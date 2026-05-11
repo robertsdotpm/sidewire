@@ -58,9 +58,12 @@ def ordered_ack_send(
     if queue_id_hex not in client.msg_queues[msg_type]:
         client.msg_queues[msg_type][queue_id_hex] = {}
 
-    # Ensure no collisions for new messages.
+    # Ensure no collisions for new messages. Use max+1 rather than
+    # len so a dequeue_msg call that deletes an entry doesn't produce
+    # a seq_no that collides with the already-resolved entry.
     if seq_no is None:
-        seq_no = len(client.msg_queues[msg_type][queue_id_hex])
+        existing = client.msg_queues[msg_type][queue_id_hex]
+        seq_no = (max(existing.keys()) + 1) if existing else 0
 
     # Pack the message using AppPacket (handles signing and header construction).
     packet = AppPacket(

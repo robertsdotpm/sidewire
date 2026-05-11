@@ -132,4 +132,12 @@ def process_app_ack(client, app_packet):
             return
 
         msg_meta["app_ack"].set_result(True)
+
+        # PROBE entries are probe_one_shot and never deleted by dequeue_msg
+        # (which is only called for MsgEnum.MSG). Delete them here so
+        # msg_queues[PROBE] doesn't accumulate indefinitely.
+        if msg_meta.get("probe_one_shot"):
+            del client.msg_queues[msg_type][queue_id][seq_no]
+            if not client.msg_queues[msg_type][queue_id]:
+                del client.msg_queues[msg_type][queue_id]
         return
