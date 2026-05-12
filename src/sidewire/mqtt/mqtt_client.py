@@ -482,7 +482,6 @@ async def demo_mqtt():
         msg, src_pk_hex, queue_id_hex, client
     ):
         """Print the received message, sender public key, and queue ID during the demo."""
-        print("msg handler got ", msg, " ", src_pk_hex, " ", queue_id_hex)
 
     alice_kp = Signing.keypair()
     alice_queue_id = hashlib.sha256(b"alice pipe").hexdigest()
@@ -503,7 +502,6 @@ async def demo_mqtt():
         )
 
         await bob_ack
-        print("got ack from bob")
         await asyncio.sleep(4)
     finally:
         await alice_client.close()

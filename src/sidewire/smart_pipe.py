@@ -81,8 +81,6 @@ class SmartPipe:
 
     async def connect(self, msg_cb=None):
         """Resolve destination clients: hint brokers first, falling back to rendezvous."""
-        print("[SMARTPIPE-CONNECT] dest={0} enter clients={1} hints={2}".format(
-            self.dest_pub_hex[:12], len(self.clients), len(self.hint_brokers)))
         if not self.clients:
             # Try hint brokers first. If we get at least one, use
             # the hint set -- the dest is guaranteed subscribed.

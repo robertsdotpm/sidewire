@@ -230,9 +230,6 @@ class Router:
                 if (now - last_active) < IDLE_CLIENT_TIMEOUT:
                     continue
 
-                print("[IDLE-CLOSER] closing idle client host={0} af={1} last_active={2:.0f}s ago".format(
-                    client.host, client.af, now - last_active
-                ))
 
                 try:
                     await client.close()

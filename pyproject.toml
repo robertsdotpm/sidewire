@@ -15,7 +15,7 @@ requires-python = ">=3.5"
 authors = [
     {name="Matthew Roberts", email="matthew@roberts.pm"}
 ]
-license = {text = "MIT"}  # or whichever license
+license = {text = "MIT"}
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",

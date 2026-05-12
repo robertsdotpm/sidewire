@@ -142,6 +142,3 @@ if __name__ == "__main__":
     raw = pkt.build()
 
     pkt2 = mqtt_parse_packet(raw)
-    print(pkt2)
-    print(pkt2.type)
-    print(pkt2.payload)
