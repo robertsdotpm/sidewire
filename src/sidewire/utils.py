@@ -117,8 +117,8 @@ async def try_client(
         if client.last_connect is not None:
             if (now - client.last_connect) < retry_duration:
                 log(fstr(
-                    "[TRY-CLIENT] host={0} rate-limited ({1:.0f}s remaining)",
-                    (client.host, retry_duration - (now - client.last_connect)),
+                    "[TRY-CLIENT] host={0} rate-limited ({1}s remaining)",
+                    (client.host, "%.0f" % (retry_duration - (now - client.last_connect))),
                 ))
                 return None
         log(fstr("[TRY-CLIENT] host={0} connecting (timeout={1}s)",
