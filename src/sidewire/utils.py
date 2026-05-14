@@ -125,9 +125,18 @@ async def try_client(
             (client.host, connect_timeout)))
         try:
             await asyncio.wait_for(client.connect(), connect_timeout)
-        except (OSError, ConnectionError, asyncio.TimeoutError):
+        except (OSError, ConnectionError, asyncio.TimeoutError) as exc:
             client.last_connect = now
-            log_exception()
+            # One-line summary instead of full traceback.  This fires
+            # for every MQTT broker that fails in the fallback list --
+            # network design, not a bug -- so a 10-line traceback per
+            # attempt is just noise.  The exception class + str() are
+            # enough to tell ConnectionRefused from TimeoutError when
+            # debugging.
+            log(fstr(
+                "[TRY-CLIENT] host={0} connect failed: {1}: {2}",
+                (client.host, type(exc).__name__, str(exc) or "(no message)"),
+            ))
             return None
 
     # Guard against zombie clients: dispatcher_task is non-None but the
