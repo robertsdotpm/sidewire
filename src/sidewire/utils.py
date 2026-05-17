@@ -206,14 +206,40 @@ async def get_dest_clients(
         limit = min(len(candidate_clients), max_servers)
         for i in range(0, limit, batch_size):
             batch = candidate_clients[i : i + batch_size]
-            results = await asyncio.gather(
-                *[try_client(dest_pub_hex, c) for c in batch], return_exceptions=True
-            )
-            for client, result in zip(batch, results):
-                if result is client:
-                    af_found.append(client)
-                    if len(af_found) >= n:
-                        break
+            # Fire the batch's connect attempts concurrently, but stop
+            # the moment n succeed.  A dead broker's TCP connect can
+            # hang for ~4s; the previous gather-then-check waited for
+            # the whole batch -- including those laggards -- even with
+            # n good clients already in hand.  as_completed lets us
+            # break on the n-th success and cancel the still-pending
+            # (almost always dead) connects instead of awaiting them.
+            tasks = [
+                asyncio.ensure_future(try_client(dest_pub_hex, c))
+                for c in batch
+            ]
+            try:
+                for fut in asyncio.as_completed(tasks):
+                    try:
+                        result = await fut
+                    except asyncio.CancelledError:  # pylint: disable=try-except-raise
+                        raise
+                    except (OSError, ConnectionError, asyncio.TimeoutError):
+                        # try_client already swallows these and returns
+                        # None; this is belt-and-suspenders only.
+                        result = None
+                    # try_client returns the client itself on success,
+                    # None on failure -- no batch-index mapping needed.
+                    if result is not None:
+                        af_found.append(result)
+                        if len(af_found) >= n:
+                            break
+            finally:
+                # Cancel any connect still in flight (the laggards we
+                # broke away from) and drain so none are left orphaned.
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
             if len(af_found) >= n:
                 break
         log(fstr(
