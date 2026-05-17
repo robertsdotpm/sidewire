@@ -8,6 +8,7 @@ from aionetiface import (
     h_to_b,
     log,
     log_exception,
+    os_net_timeouts,
     rand_b,
     rendezvous_score,
     to_b,
@@ -204,10 +205,14 @@ async def get_dest_clients(
     # wants -- scaled down for small buckets so a short list (e.g. the
     # 3-broker IPv6 bucket) doesn't chase an unreachable target and
     # stall on a dead server it can never skip past.  WALK_CAP hard-
-    # bounds the wait: once 1s elapses we take whatever connected.
+    # bounds the wait: once it elapses we take whatever connected.
     # Both AF walks run concurrently (gather below), so the whole
-    # broker phase stays ~1s total, not 1s per AF.
-    WALK_CAP = 1.0
+    # broker phase stays ~WALK_CAP total, not WALK_CAP per AF.
+    #
+    # OS-scaled: 1s on modern hosts, much larger on XP/Vista -- XP's
+    # MQTT handshake alone runs ~8-12s, so a 1s cap there would admit
+    # zero brokers and strand signalling.
+    WALK_CAP = os_net_timeouts()["broker_walk_cap"]
 
     async def walk_af(nic_af):
         """Connect `needed` brokers for one address family, capped at 1s."""
