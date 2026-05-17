@@ -7,6 +7,7 @@ when done.
 
 import asyncio
 import random
+import time
 from aionetiface import Pipe, TCP, rand_plain, to_hs, log, fstr
 from .utils import reset_session_state
 from .mqtt_reader import mqtt_packet_reader
@@ -32,6 +33,17 @@ async def mqtt_connect(self, keep_alive):
         (self.host, self.port, self.af, self.client_id, keep_alive),
     ))
 
+    # Per-stage timeline for one broker connect: TCP connect -> CONNACK
+    # -> SUBACK. Lets the router-startup cost be attributed to a stage.
+    stage_t0 = time.monotonic()
+
+    def stage(name):
+        log(fstr(
+            "[MQTT-STAGE] host={0}:{1} t={2}ms stage={3}",
+            (self.host, self.port,
+             int((time.monotonic() - stage_t0) * 1000), name),
+        ))
+
     # Establish TCP Connection
     pipe = await Pipe(TCP, (self.host, self.port), route).connect()
     if not pipe:
@@ -43,6 +55,7 @@ async def mqtt_connect(self, keep_alive):
             "TCP Connection failed to {}:{}".format(self.host, self.port)
         )
 
+    stage("tcp_up")
     log(fstr(
         "[MQTT-CONNECT] TCP up host={0}:{1}; sending CONNECT packet ({2} bytes)",
         (self.host, self.port, len(build_connect(self.client_id, keep_alive))),
@@ -86,6 +99,7 @@ async def mqtt_connect(self, keep_alive):
             (self.host, self.port, self.client_id, connack_repr),
         ))
 
+    stage("connack")
     log(fstr(
         "[MQTT-CONNECT] OK host={0}:{1} client_id={2}",
         (self.host, self.port, self.client_id),
@@ -112,6 +126,8 @@ async def mqtt_connect(self, keep_alive):
         except Exception:
             pass
         raise
+
+    stage("subscribed")
 
     # Return connected pipe.
     return pipe

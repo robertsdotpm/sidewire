@@ -1,4 +1,5 @@
 import asyncio
+import time
 from aionetiface import (
     INFRA,
     IP4,
@@ -178,7 +179,19 @@ async def get_dest_clients(
     callers (Router.protected_clients, smart_pipe) don't need to
     change. Total returned size is up to n * len(supported AFs).
     """
+    # Stage timeline for the router-load breakdown: setup (rendezvous
+    # scoring, candidate-list build) vs the actual broker connects.
+    dest_t0 = time.monotonic()
+
+    def dest_stage(name):
+        log(fstr(
+            "[ROUTER-TIME] t={0}ms stage={1}",
+            (int((time.monotonic() - dest_t0) * 1000), name),
+        ))
+
+    dest_stage("get_dest_enter")
     af_buckets = rendezvous_hash(nic, dest_pub_hex, servers)
+    dest_stage("rendezvous_done")
     # server["af"] is the IANA protocol number from the INFRA database (always 10
     # for IPv6, 2 for IPv4). clients_map is keyed by the platform's socket.AF_*
     # constants, which differ on Windows (AF_INET6 = 23) vs Linux (AF_INET6 = 10).
@@ -187,13 +200,17 @@ async def get_dest_clients(
 
     found_clients = []
 
-    # Walk each AF bucket independently. n is the per-AF top count.
-    # batch_size keeps the connect attempts within a batch concurrent
-    # so a slow broker doesn't sequentialise the walk.
-    batch_size = n * 2
+    # Per-AF broker walk.  `needed` is how many good clients an AF
+    # wants -- scaled down for small buckets so a short list (e.g. the
+    # 3-broker IPv6 bucket) doesn't chase an unreachable target and
+    # stall on a dead server it can never skip past.  WALK_CAP hard-
+    # bounds the wait: once 1s elapses we take whatever connected.
+    # Both AF walks run concurrently (gather below), so the whole
+    # broker phase stays ~1s total, not 1s per AF.
+    WALK_CAP = 1.0
 
     async def walk_af(nic_af):
-        """Connect up to n brokers for one address family; return them."""
+        """Connect `needed` brokers for one address family, capped at 1s."""
         sorted_servers = af_buckets[nic_af]
         candidate_clients = []
         for server in sorted_servers:
@@ -203,49 +220,57 @@ async def get_dest_clients(
                 continue
             candidate_clients.append(clients_map[af][host])
 
+        # needed = how many good brokers this AF wants, stepping up at
+        # the 2 / 4 / 8 candidate-count thresholds: <2 -> 0 (skip the
+        # AF, no redundancy worth stalling for), 2-3 -> 1, 4-7 -> 2,
+        # 8+ -> 3.  Those thresholds are powers of two, so the step
+        # count is just floor(log2(serv_no)) clamped to [0, 3] --
+        # bit_length()-1 gives floor(log2) integer-exact (no float
+        # rounding on exact powers of two).
+        serv_no = len(candidate_clients)
+        needed = min(3, max(0, serv_no.bit_length() - 1))
+
+        if needed == 0:
+            log(fstr(
+                "[GET-DEST-CLIENTS] dest={0} af={1} candidates={2} needed=0 found=0",
+                (dest_pub_hex[:12], nic_af, serv_no),
+            ))
+            return []
+
+        # Fire up to 10 connects; collect first-to-complete until
+        # `needed` good clients are in.
+        tasks = [
+            asyncio.ensure_future(try_client(dest_pub_hex, c))
+            for c in candidate_clients[:10]
+        ]
         af_found = []
-        limit = min(len(candidate_clients), max_servers)
-        for i in range(0, limit, batch_size):
-            batch = candidate_clients[i : i + batch_size]
-            # Fire the batch's connect attempts concurrently, but stop
-            # the moment n succeed.  A dead broker's TCP connect can
-            # hang for ~4s; the previous gather-then-check waited for
-            # the whole batch -- including those laggards -- even with
-            # n good clients already in hand.  as_completed lets us
-            # break on the n-th success and cancel the still-pending
-            # (almost always dead) connects instead of awaiting them.
-            tasks = [
-                asyncio.ensure_future(try_client(dest_pub_hex, c))
-                for c in batch
-            ]
-            try:
-                for fut in asyncio.as_completed(tasks):
-                    try:
-                        result = await fut
-                    except asyncio.CancelledError:  # pylint: disable=try-except-raise
-                        raise
-                    except (OSError, ConnectionError, asyncio.TimeoutError):
-                        # try_client already swallows these and returns
-                        # None; this is belt-and-suspenders only.
-                        result = None
-                    # try_client returns the client itself on success,
-                    # None on failure -- no batch-index mapping needed.
-                    if result is not None:
-                        af_found.append(result)
-                        if len(af_found) >= n:
-                            break
-            finally:
-                # Cancel any connect still in flight (the laggards we
-                # broke away from) and drain so none are left orphaned.
-                for t in tasks:
-                    if not t.done():
-                        t.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
-            if len(af_found) >= n:
-                break
+
+        async def collect():
+            for fut in asyncio.as_completed(tasks):
+                r = await fut
+                if r:
+                    af_found.append(r)
+                    if len(af_found) >= needed:
+                        return
+
+        try:
+            await asyncio.wait_for(collect(), timeout=WALK_CAP)
+        except asyncio.TimeoutError:
+            # 1s cap hit -- take whatever connected so far.
+            pass
+        finally:
+            # Cancel the still-pending connects (laggards / dead
+            # brokers).  Not awaited: awaiting their cancellation
+            # cleanup could push the walk past the 1s cap.  They
+            # unwind and close their own half-open pipes in the
+            # background.
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+
         log(fstr(
-            "[GET-DEST-CLIENTS] dest={0} af={1} candidates={2} found={3}",
-            (dest_pub_hex[:12], nic_af, len(candidate_clients), len(af_found)),
+            "[GET-DEST-CLIENTS] dest={0} af={1} candidates={2} needed={3} found={4}",
+            (dest_pub_hex[:12], nic_af, serv_no, needed, len(af_found)),
         ))
         return af_found
 
@@ -253,9 +278,11 @@ async def get_dest_clients(
     # router startup is max(af_v4, af_v6) instead of their sum. gather
     # preserves input order, so found_clients keeps af-bucket order.
     af_keys = list(af_buckets)
+    dest_stage("walks_start")
     per_af_results = await asyncio.gather(
         *[walk_af(nic_af) for nic_af in af_keys]
     )
+    dest_stage("walks_done")
     for af_found in per_af_results:
         found_clients.extend(af_found)
 
