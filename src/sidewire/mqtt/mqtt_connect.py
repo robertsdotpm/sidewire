@@ -14,6 +14,17 @@ from .mqtt_reader import mqtt_packet_reader
 from .mqtt_msgs import build_connect
 
 
+# Opt-in pipelined handshake. When False (default) the connect does
+# the standard MQTT sequence: send CONNECT, wait CONNACK, send
+# SUBSCRIBE, wait SUBACK -- two sequential round trips. When True it
+# sends CONNECT and SUBSCRIBE back-to-back and reads both acks after,
+# collapsing it to one round trip (~200ms/broker saved). Kept off by
+# default because a strict broker may reject a SUBSCRIBE that arrives
+# before it has sent its CONNACK; flip this on only after the broker
+# pool has been verified to tolerate it.
+MQTT_PIPELINE_HANDSHAKE = False
+
+
 # Connect to MQTT server, subcribe to our public key hex.
 # Setup stream-based packet reconstruction handler.
 async def mqtt_connect(self, keep_alive):
@@ -65,9 +76,22 @@ async def mqtt_connect(self, keep_alive):
     connect_buf = build_connect(self.client_id, keep_alive=keep_alive)
     await pipe.send(connect_buf)
 
-    # Expecting a standard 4-byte CONNACK (0x20 0x02 0x00 0x00)
+    # Pipelined handshake (opt-in): fire SUBSCRIBE straight after
+    # CONNECT rather than waiting for the CONNACK first. The SUBACK is
+    # collected after, along with the CONNACK, below.
+    sub_ack_future = None
+    if MQTT_PIPELINE_HANDSHAKE:
+        pub_hex = to_hs(self.kp.compact_public_key)
+        sub_buf, sub_ack_future = self.subscribe(pub_hex)
+        await pipe.send(sub_buf)
+
+    # Expecting a standard 4-byte CONNACK (0x20 0x02 0x00 0x00).  With
+    # the pipelined handshake the SUBACK can arrive glued to the
+    # CONNACK inside one recv, so recv_n(4) may return more than 4
+    # bytes -- slice the CONNACK off and keep the remainder for the
+    # packet reader.
     try:
-        connack = await asyncio.wait_for(pipe.recv_n(4), timeout=4)
+        connack_raw = await asyncio.wait_for(pipe.recv_n(4), timeout=4)
     except asyncio.TimeoutError as exc:
         log(fstr(
             "[MQTT-CONNECT] FAIL host={0}:{1} client_id={2}: CONNACK timeout "
@@ -79,6 +103,9 @@ async def mqtt_connect(self, keep_alive):
             "conack timeout from {0}:{1} client_id={2}",
             (self.host, self.port, self.client_id),
         )) from exc
+
+    connack = connack_raw[:4]
+    suback_leftover = connack_raw[4:]
 
     # Check protocol response for conack.
     if connack != b" \x02\x00\x00":
@@ -118,7 +145,24 @@ async def mqtt_connect(self, keep_alive):
 
     # Public Key Subscription
     try:
-        await subscribe_to_identity(self, pipe)
+        if MQTT_PIPELINE_HANDSHAKE:
+            # SUBSCRIBE was already sent right after CONNECT. Hand the
+            # packet reader any SUBACK bytes that arrived glued to the
+            # CONNACK, then await the SUBACK future + verify QoS the
+            # same way subscribe_to_identity does.
+            if suback_leftover:
+                await mqtt_packet_reader(
+                    self, suback_leftover,
+                    getattr(pipe, "client_tup", None), pipe,
+                )
+            return_codes = await asyncio.wait_for(sub_ack_future, timeout=4)
+            for code in return_codes:
+                if code != 1:
+                    raise ConnectionError(
+                        "MQTT subscription failed: expected QoS 1, got code {}".format(code)
+                    )
+        else:
+            await subscribe_to_identity(self, pipe)
     except BaseException:
         self.pipe = None
         try:
