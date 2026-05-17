@@ -188,10 +188,12 @@ async def get_dest_clients(
     found_clients = []
 
     # Walk each AF bucket independently. n is the per-AF top count.
-    # batch_size keeps the connect attempts within an AF concurrent
-    # so a slow broker doesn't sequentialise the whole walk.
+    # batch_size keeps the connect attempts within a batch concurrent
+    # so a slow broker doesn't sequentialise the walk.
     batch_size = n * 2
-    for nic_af in af_buckets:
+
+    async def walk_af(nic_af):
+        """Connect up to n brokers for one address family; return them."""
         sorted_servers = af_buckets[nic_af]
         candidate_clients = []
         for server in sorted_servers:
@@ -199,8 +201,7 @@ async def get_dest_clients(
             host = server["host"]
             if af not in clients_map or host not in clients_map[af]:
                 continue
-            client = clients_map[af][host]
-            candidate_clients.append(client)
+            candidate_clients.append(clients_map[af][host])
 
         af_found = []
         limit = min(len(candidate_clients), max_servers)
@@ -246,6 +247,16 @@ async def get_dest_clients(
             "[GET-DEST-CLIENTS] dest={0} af={1} candidates={2} found={3}",
             (dest_pub_hex[:12], nic_af, len(candidate_clients), len(af_found)),
         ))
+        return af_found
+
+    # Run the per-AF walks concurrently -- they are independent, so
+    # router startup is max(af_v4, af_v6) instead of their sum. gather
+    # preserves input order, so found_clients keeps af-bucket order.
+    af_keys = list(af_buckets)
+    per_af_results = await asyncio.gather(
+        *[walk_af(nic_af) for nic_af in af_keys]
+    )
+    for af_found in per_af_results:
         found_clients.extend(af_found)
 
     log(fstr(
