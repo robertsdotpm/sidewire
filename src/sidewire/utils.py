@@ -1,4 +1,5 @@
 import asyncio
+import time
 from aionetiface import (
     INFRA,
     IP4,
@@ -7,6 +8,7 @@ from aionetiface import (
     h_to_b,
     log,
     log_exception,
+    os_net_timeouts,
     rand_b,
     rendezvous_score,
     to_b,
@@ -178,7 +180,19 @@ async def get_dest_clients(
     callers (Router.protected_clients, smart_pipe) don't need to
     change. Total returned size is up to n * len(supported AFs).
     """
+    # Stage timeline for the router-load breakdown: setup (rendezvous
+    # scoring, candidate-list build) vs the actual broker connects.
+    dest_t0 = time.monotonic()
+
+    def dest_stage(name):
+        log(fstr(
+            "[ROUTER-TIME] t={0}ms stage={1}",
+            (int((time.monotonic() - dest_t0) * 1000), name),
+        ))
+
+    dest_stage("get_dest_enter")
     af_buckets = rendezvous_hash(nic, dest_pub_hex, servers)
+    dest_stage("rendezvous_done")
     # server["af"] is the IANA protocol number from the INFRA database (always 10
     # for IPv6, 2 for IPv4). clients_map is keyed by the platform's socket.AF_*
     # constants, which differ on Windows (AF_INET6 = 23) vs Linux (AF_INET6 = 10).
@@ -187,11 +201,21 @@ async def get_dest_clients(
 
     found_clients = []
 
-    # Walk each AF bucket independently. n is the per-AF top count.
-    # batch_size keeps the connect attempts within an AF concurrent
-    # so a slow broker doesn't sequentialise the whole walk.
-    batch_size = n * 2
-    for nic_af in af_buckets:
+    # Per-AF broker walk.  `needed` is how many good clients an AF
+    # wants -- scaled down for small buckets so a short list (e.g. the
+    # 3-broker IPv6 bucket) doesn't chase an unreachable target and
+    # stall on a dead server it can never skip past.  WALK_CAP hard-
+    # bounds the wait: once it elapses we take whatever connected.
+    # Both AF walks run concurrently (gather below), so the whole
+    # broker phase stays ~WALK_CAP total, not WALK_CAP per AF.
+    #
+    # OS-scaled: 1s on modern hosts, much larger on XP/Vista -- XP's
+    # MQTT handshake alone runs ~8-12s, so a 1s cap there would admit
+    # zero brokers and strand signalling.
+    WALK_CAP = os_net_timeouts()["broker_walk_cap"]
+
+    async def walk_af(nic_af):
+        """Connect `needed` brokers for one address family, capped at 1s."""
         sorted_servers = af_buckets[nic_af]
         candidate_clients = []
         for server in sorted_servers:
@@ -199,27 +223,72 @@ async def get_dest_clients(
             host = server["host"]
             if af not in clients_map or host not in clients_map[af]:
                 continue
-            client = clients_map[af][host]
-            candidate_clients.append(client)
+            candidate_clients.append(clients_map[af][host])
 
+        # needed = how many good brokers this AF wants, stepping up at
+        # the 2 / 4 / 8 candidate-count thresholds: <2 -> 0 (skip the
+        # AF, no redundancy worth stalling for), 2-3 -> 1, 4-7 -> 2,
+        # 8+ -> 3.  Those thresholds are powers of two, so the step
+        # count is just floor(log2(serv_no)) clamped to [0, 3] --
+        # bit_length()-1 gives floor(log2) integer-exact (no float
+        # rounding on exact powers of two).
+        serv_no = len(candidate_clients)
+        needed = min(3, max(0, serv_no.bit_length() - 1))
+
+        if needed == 0:
+            log(fstr(
+                "[GET-DEST-CLIENTS] dest={0} af={1} candidates={2} needed=0 found=0",
+                (dest_pub_hex[:12], nic_af, serv_no),
+            ))
+            return []
+
+        # Fire up to 10 connects; collect first-to-complete until
+        # `needed` good clients are in.
+        tasks = [
+            asyncio.ensure_future(try_client(dest_pub_hex, c))
+            for c in candidate_clients[:10]
+        ]
         af_found = []
-        limit = min(len(candidate_clients), max_servers)
-        for i in range(0, limit, batch_size):
-            batch = candidate_clients[i : i + batch_size]
-            results = await asyncio.gather(
-                *[try_client(dest_pub_hex, c) for c in batch], return_exceptions=True
-            )
-            for client, result in zip(batch, results):
-                if result is client:
-                    af_found.append(client)
-                    if len(af_found) >= n:
-                        break
-            if len(af_found) >= n:
-                break
+
+        async def collect():
+            for fut in asyncio.as_completed(tasks):
+                r = await fut
+                if r:
+                    af_found.append(r)
+                    if len(af_found) >= needed:
+                        return
+
+        try:
+            await asyncio.wait_for(collect(), timeout=WALK_CAP)
+        except asyncio.TimeoutError:
+            # 1s cap hit -- take whatever connected so far.
+            pass
+        finally:
+            # Cancel the still-pending connects (laggards / dead
+            # brokers).  Not awaited: awaiting their cancellation
+            # cleanup could push the walk past the 1s cap.  They
+            # unwind and close their own half-open pipes in the
+            # background.
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+
         log(fstr(
-            "[GET-DEST-CLIENTS] dest={0} af={1} candidates={2} found={3}",
-            (dest_pub_hex[:12], nic_af, len(candidate_clients), len(af_found)),
+            "[GET-DEST-CLIENTS] dest={0} af={1} candidates={2} needed={3} found={4}",
+            (dest_pub_hex[:12], nic_af, serv_no, needed, len(af_found)),
         ))
+        return af_found
+
+    # Run the per-AF walks concurrently -- they are independent, so
+    # router startup is max(af_v4, af_v6) instead of their sum. gather
+    # preserves input order, so found_clients keeps af-bucket order.
+    af_keys = list(af_buckets)
+    dest_stage("walks_start")
+    per_af_results = await asyncio.gather(
+        *[walk_af(nic_af) for nic_af in af_keys]
+    )
+    dest_stage("walks_done")
+    for af_found in per_af_results:
         found_clients.extend(af_found)
 
     log(fstr(
