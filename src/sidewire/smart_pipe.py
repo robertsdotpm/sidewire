@@ -45,26 +45,15 @@ class SmartPipe:
             host = hint.get("host")
             port = hint.get("port")
             if af is None or not host or not port:
-                log(fstr("[SMARTPIPE-HINT] dest={0} malformed hint af={1} host={2}",
-                    (self.dest_pub_hex[:12], af, host)))
                 continue
             af_clients = self.router.clients.get(af, {})
             client = af_clients.get(host)
             if client is None:
-                log(fstr(
-                    "[SMARTPIPE-HINT] dest={0} hint host={1} af={2} not in clients_map"
-                    " (known_afs={3})",
-                    (self.dest_pub_hex[:12], host, af,
-                     list(self.router.clients.keys())),
-                ))
                 continue
-            log(fstr("[SMARTPIPE-HINT] dest={0} queuing hint host={1} af={2}",
-                (self.dest_pub_hex[:12], host, af)))
+
             to_try.append(client)
 
         if not to_try:
-            log(fstr("[SMARTPIPE-HINT] dest={0} no hint clients found in clients_map",
-                (self.dest_pub_hex[:12],)))
             return []
 
         results = await asyncio.gather(
@@ -75,8 +64,7 @@ class SmartPipe:
         for client, result in zip(to_try, results):
             if result is client:
                 out.append(client)
-        log(fstr("[SMARTPIPE-HINT] dest={0} tried={1} connected={2}",
-            (self.dest_pub_hex[:12], len(to_try), len(out))))
+
         return out
 
     async def connect(self, msg_cb=None):
@@ -86,10 +74,6 @@ class SmartPipe:
             # the hint set -- the dest is guaranteed subscribed.
             if self.hint_brokers:
                 self.clients = await self.resolve_hint_clients()
-                log(fstr(
-                    "[SMARTPIPE-CONNECT] dest={0} hint_count={1} hint_clients={2}",
-                    (self.dest_pub_hex[:12], len(self.hint_brokers), len(self.clients)),
-                ))
 
             # Fall back to rendezvous discovery if hints didn't
             # produce any reachable clients.
@@ -100,20 +84,6 @@ class SmartPipe:
                     self.router.servers,
                     self.router.clients,
                 )
-                log(fstr(
-                    "[SMARTPIPE-CONNECT] dest={0} rendezvous_clients={1}",
-                    (self.dest_pub_hex[:12], len(self.clients)),
-                ))
-        else:
-            log(fstr(
-                "[SMARTPIPE-CONNECT] dest={0} cached_clients={1}",
-                (self.dest_pub_hex[:12], len(self.clients)),
-            ))
-
-        log(fstr(
-            "[SMARTPIPE-CONNECT] dest={0} total_clients={1}",
-            (self.dest_pub_hex[:12], len(self.clients)),
-        ))
 
         if msg_cb:
             for client in self.clients:
@@ -123,10 +93,6 @@ class SmartPipe:
 
     async def send(self, msg, timeout=4):
         """Send a message to the destination, returning the byte length on success or 0 on failure."""
-        log(fstr(
-            "[SMARTPIPE-SEND] dest={0} clients={1} msg_len={2} timeout={3}s",
-            (self.dest_pub_hex[:12], len(self.clients), len(msg), timeout),
-        ))
         msg_id_hex = to_h(rand_b(32))
 
         tasks = []
@@ -154,15 +120,6 @@ class SmartPipe:
                     winner_host = getattr(winner, "host", "?") if winner else "?"
                     try:
                         await task
-
-                        log(fstr(
-                            "[SMARTPIPE-SEND] dest={0} ACK from broker={1} "
-                            "(cancelling {2} other(s))",
-                            (
-                                self.dest_pub_hex[:12], winner_host,
-                                len(pending),
-                            ),
-                        ))
 
                         for p in pending:
                             p.cancel()
@@ -195,10 +152,6 @@ class SmartPipe:
             for client in self.clients:
                 client.dequeue_msg(msg_id_hex)
 
-        log(fstr(
-            "[SMARTPIPE-SEND] dest={0} result=0 (no ACK from any client)",
-            (self.dest_pub_hex[:12],),
-        ))
         return 0
 
     async def close(self):

@@ -39,38 +39,12 @@ async def mqtt_connect(self, keep_alive):
     self.client_id = self.client_id or rand_plain(15)
     route = self.nic.route(self.af)
 
-    log(fstr(
-        "[MQTT-CONNECT] starting host={0}:{1} af={2} client_id={3} keep_alive={4}",
-        (self.host, self.port, self.af, self.client_id, keep_alive),
-    ))
-
-    # Per-stage timeline for one broker connect: TCP connect -> CONNACK
-    # -> SUBACK. Lets the router-startup cost be attributed to a stage.
-    stage_t0 = time.monotonic()
-
-    def stage(name):
-        log(fstr(
-            "[MQTT-STAGE] host={0}:{1} t={2}ms stage={3}",
-            (self.host, self.port,
-             int((time.monotonic() - stage_t0) * 1000), name),
-        ))
-
     # Establish TCP Connection
     pipe = await Pipe(TCP, (self.host, self.port), route).connect()
     if not pipe:
-        log(fstr(
-            "[MQTT-CONNECT] FAIL host={0}:{1}: TCP connect returned None",
-            (self.host, self.port),
-        ))
         raise ConnectionError(
             "TCP Connection failed to {}:{}".format(self.host, self.port)
         )
-
-    stage("tcp_up")
-    log(fstr(
-        "[MQTT-CONNECT] TCP up host={0}:{1}; sending CONNECT packet ({2} bytes)",
-        (self.host, self.port, len(build_connect(self.client_id, keep_alive))),
-    ))
 
     # MQTT Handshake (CONNECT/CONNACK)
     connect_buf = build_connect(self.client_id, keep_alive=keep_alive)
@@ -93,11 +67,6 @@ async def mqtt_connect(self, keep_alive):
     try:
         connack_raw = await asyncio.wait_for(pipe.recv_n(4), timeout=4)
     except asyncio.TimeoutError as exc:
-        log(fstr(
-            "[MQTT-CONNECT] FAIL host={0}:{1} client_id={2}: CONNACK timeout "
-            "(broker accepted TCP + our CONNECT but did not respond within 4s)",
-            (self.host, self.port, self.client_id),
-        ))
         await pipe.close()
         raise ConnectionError(fstr(
             "conack timeout from {0}:{1} client_id={2}",
@@ -112,25 +81,11 @@ async def mqtt_connect(self, keep_alive):
         # fstr() doesn't support the {n!r} format spec, so pre-render
         # connack via repr() and pass the resulting string in.
         connack_repr = repr(connack)
-        log(fstr(
-            "[MQTT-CONNECT] FAIL host={0}:{1} client_id={2}: bad CONNACK "
-            "{3} (empty bytes mean broker closed TCP after our CONNECT -- "
-            "rate-limit / blacklist / malformed-packet rejection. Non-empty "
-            "bytes that don't match would mean broker accepted but returned "
-            "an error code.)",
-            (self.host, self.port, self.client_id, connack_repr),
-        ))
         await pipe.close()
         raise ConnectionError(fstr(
             "Invalid MQTT CONNACK from {0}:{1} client_id={2}: {3}",
             (self.host, self.port, self.client_id, connack_repr),
         ))
-
-    stage("connack")
-    log(fstr(
-        "[MQTT-CONNECT] OK host={0}:{1} client_id={2}",
-        (self.host, self.port, self.client_id),
-    ))
 
     # Message Processing Setup
     self.pipe = pipe
@@ -170,8 +125,6 @@ async def mqtt_connect(self, keep_alive):
         except Exception:
             pass
         raise
-
-    stage("subscribed")
 
     # Return connected pipe.
     return pipe

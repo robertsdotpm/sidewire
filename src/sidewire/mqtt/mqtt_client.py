@@ -180,7 +180,6 @@ class MQTTClient:
         """Connect to the MQTT server and start the background message dispatcher."""
         # Re-entry guard.
         if self.dispatcher_task and not self.dispatcher_task.done():
-            log(fstr("[MQTT-CLIENT-CONNECT] host={0} re-entry: dispatcher already running (task_done={1})", (self.host, self.dispatcher_task.done())))
             return self.pipe
 
         # Store for use in timestamp validation on receive.
@@ -430,10 +429,7 @@ class MQTTClient:
         """Cleanly shut down the dispatcher, send DISCONNECT, and close the pipe."""
         # Already closed.
         if self.is_closed.is_set():
-            log(fstr("[MQTT-CLIENT-CLOSE] host={0} already closed, skipping", (self.host,)))
             return
-
-        log(fstr("[MQTT-CLIENT-CLOSE] host={0} closing", (self.host,)))
 
         # Indicate closed to block other callers.
         self.is_closed.set()

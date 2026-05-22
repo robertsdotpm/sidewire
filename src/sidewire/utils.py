@@ -111,41 +111,16 @@ async def try_client(
     only set inside the except branch, so successful (or recovered)
     connects don't poison the per-broker cache.
     """
-    log(fstr("[TRY-CLIENT] host={0} af={1} already_connected={2}",
-        (client.host, client.af,
-         client.dispatcher_task is not None and not client.dispatcher_task.done())))
     if client.dispatcher_task is None:
         now = client.get_time()
         if client.last_connect is not None:
             if (now - client.last_connect) < retry_duration:
-                log(fstr(
-                    "[TRY-CLIENT] host={0} rate-limited ({1}s remaining)",
-                    (client.host, "%.0f" % (retry_duration - (now - client.last_connect))),
-                ))
                 return None
-        log(fstr("[TRY-CLIENT] host={0} connecting (timeout={1}s)",
-            (client.host, connect_timeout)))
         try:
             await asyncio.wait_for(client.connect(), connect_timeout)
         except (OSError, ConnectionError, asyncio.TimeoutError) as exc:
             client.last_connect = now
-            # One-line summary instead of full traceback.  This fires
-            # for every MQTT broker that fails in the fallback list --
-            # network design, not a bug -- so a 10-line traceback per
-            # attempt is just noise.  The exception class + str() are
-            # enough to tell ConnectionRefused from TimeoutError when
-            # debugging.
-            log(fstr(
-                "[TRY-CLIENT] host={0} connect failed: {1}: {2}",
-                (client.host, type(exc).__name__, str(exc) or "(no message)"),
-            ))
             return None
-
-    # Guard against zombie clients: dispatcher_task is non-None but the
-    # task already completed (happens when is_closed was set before the
-    # dispatcher started -- fixed in close_idle_clients, but log if seen).
-    if client.dispatcher_task is not None and client.dispatcher_task.done():
-        log(fstr("[TRY-CLIENT] host={0} zombie dispatcher_task detected (done but non-None)", (client.host,)))
 
     return client
 
@@ -185,10 +160,7 @@ async def get_dest_clients(
     dest_t0 = time.monotonic()
 
     def dest_stage(name):
-        log(fstr(
-            "[ROUTER-TIME] t={0}ms stage={1}",
-            (int((time.monotonic() - dest_t0) * 1000), name),
-        ))
+        pass
 
     dest_stage("get_dest_enter")
     af_buckets = rendezvous_hash(nic, dest_pub_hex, servers)
@@ -236,10 +208,6 @@ async def get_dest_clients(
         needed = min(3, max(0, serv_no.bit_length() - 1))
 
         if needed == 0:
-            log(fstr(
-                "[GET-DEST-CLIENTS] dest={0} af={1} candidates={2} needed=0 found=0",
-                (dest_pub_hex[:12], nic_af, serv_no),
-            ))
             return []
 
         # Fire up to 10 connects; collect first-to-complete until
@@ -273,10 +241,6 @@ async def get_dest_clients(
                 if not t.done():
                     t.cancel()
 
-        log(fstr(
-            "[GET-DEST-CLIENTS] dest={0} af={1} candidates={2} needed={3} found={4}",
-            (dest_pub_hex[:12], nic_af, serv_no, needed, len(af_found)),
-        ))
         return af_found
 
     # Run the per-AF walks concurrently -- they are independent, so
@@ -291,10 +255,6 @@ async def get_dest_clients(
     for af_found in per_af_results:
         found_clients.extend(af_found)
 
-    log(fstr(
-        "[GET-DEST-CLIENTS] dest={0} total={1}",
-        (dest_pub_hex[:12], len(found_clients)),
-    ))
     return found_clients
 
 

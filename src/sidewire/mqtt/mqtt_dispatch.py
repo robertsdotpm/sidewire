@@ -32,7 +32,6 @@ async def dispatcher(
     """Background loop that reconnects the pipe, republishes queued messages, and sends keep-alive pings."""
     last_ping = client.get_time()
     if client.is_closed.is_set():
-        log(fstr("[DISPATCHER] host={0} exiting immediately: is_closed already set (idle-closer race)", (client.host,)))
         return
     try:
         # Loop forever until is close is set or task cancelled.

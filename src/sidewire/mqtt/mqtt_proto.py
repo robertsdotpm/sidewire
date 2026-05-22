@@ -131,17 +131,6 @@ async def handle_publish(client, packet):
             return
 
     # Route to application logic based on message type.
-    log(fstr(
-        "[MQTT-RX] handle_publish: routing msg_type={0} src_pk={1}... "
-        "queue_id={2}... seq={3} broker={4}",
-        (
-            app_packet.msg_type,
-            (app_packet.src_pk_hex or "?")[:16],
-            (app_packet.queue_id_hex or "?")[:16],
-            app_packet.seq_no,
-            getattr(client, "host", "?"),
-        ),
-    ))
     if app_packet.msg_type == MsgEnum.MSG:
         await process_app_msg(client, app_packet)
     elif app_packet.msg_type == MsgEnum.MSGACK:
