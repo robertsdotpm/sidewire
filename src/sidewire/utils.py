@@ -185,9 +185,17 @@ async def get_dest_clients(
     # MQTT handshake alone runs ~8-12s, so a 1s cap there would admit
     # zero brokers and strand signalling.
     WALK_CAP = os_net_timeouts()["broker_walk_cap"]
+    # Zero-broker fallback budget.  Skip the retry entirely when the
+    # primary cap is already >= 4s (Vista=6, XP=14) -- those OSes have
+    # generous-enough first-pass budgets that a zero result means
+    # nothing is reachable, not "we didn't wait long enough".  For
+    # the LAN-fast default (2s) and Windows (4s) we lift the cap to
+    # 4s for one retry before declaring total signaling outage.
+    RETRY_WALK_CAP = 4.0
+    retry_enabled = WALK_CAP < RETRY_WALK_CAP
 
-    async def walk_af(nic_af):
-        """Connect `needed` brokers for one address family, capped at 1s."""
+    async def walk_af(nic_af, cap):
+        """Connect `needed` brokers for one address family, capped at `cap` seconds."""
         sorted_servers = af_buckets[nic_af]
         candidate_clients = []
         for server in sorted_servers:
@@ -227,14 +235,14 @@ async def get_dest_clients(
                         return
 
         try:
-            await asyncio.wait_for(collect(), timeout=WALK_CAP)
+            await asyncio.wait_for(collect(), timeout=cap)
         except asyncio.TimeoutError:
-            # 1s cap hit -- take whatever connected so far.
+            # cap hit -- take whatever connected so far.
             pass
         finally:
             # Cancel the still-pending connects (laggards / dead
             # brokers).  Not awaited: awaiting their cancellation
-            # cleanup could push the walk past the 1s cap.  They
+            # cleanup could push the walk past the cap.  They
             # unwind and close their own half-open pipes in the
             # background.
             for t in tasks:
@@ -249,11 +257,53 @@ async def get_dest_clients(
     af_keys = list(af_buckets)
     dest_stage("walks_start")
     per_af_results = await asyncio.gather(
-        *[walk_af(nic_af) for nic_af in af_keys]
+        *[walk_af(nic_af, WALK_CAP) for nic_af in af_keys]
     )
     dest_stage("walks_done")
     for af_found in per_af_results:
         found_clients.extend(af_found)
+
+    # Zero-broker escape hatch: the first walk gave us nothing across
+    # every AF.  Rather than let the node start with
+    # protected_clients=0 (no MQTT subscriptions = no inbound signal
+    # path = total signaling outage), retry once at the doubled cap.
+    # The clients_map state is preserved across the retry; try_client
+    # short-circuits when an MQTTClient is already connected, so any
+    # in-flight CONNECT from the first pass either completed in the
+    # interim (returns immediately) or gets a fresh connect attempt
+    # under the larger budget.
+    if not found_clients:
+        if retry_enabled:
+            log(fstr(
+                "[GET-DEST-CLIENTS] dest={0} first walk admitted 0 brokers "
+                "(cap={1}s); retrying once at {2}s before giving up",
+                (dest_pub_hex[:12], WALK_CAP, RETRY_WALK_CAP),
+            ))
+            per_af_results = await asyncio.gather(
+                *[walk_af(nic_af, RETRY_WALK_CAP) for nic_af in af_keys]
+            )
+            for af_found in per_af_results:
+                found_clients.extend(af_found)
+            if not found_clients:
+                log(fstr(
+                    "[GET-DEST-CLIENTS] dest={0} retry at {1}s STILL admitted "
+                    "0 brokers -- node will start with no subscriptions and "
+                    "cannot receive inbound signal until a future walk succeeds.",
+                    (dest_pub_hex[:12], RETRY_WALK_CAP),
+                ))
+            else:
+                log(fstr(
+                    "[GET-DEST-CLIENTS] dest={0} retry recovered {1} broker(s)",
+                    (dest_pub_hex[:12], len(found_clients)),
+                ))
+        else:
+            log(fstr(
+                "[GET-DEST-CLIENTS] dest={0} walk at {1}s admitted 0 brokers "
+                "and primary cap already >= 4s; skipping retry. Node will "
+                "start with no subscriptions and cannot receive inbound "
+                "signal until a future walk succeeds.",
+                (dest_pub_hex[:12], WALK_CAP),
+            ))
 
     return found_clients
 
