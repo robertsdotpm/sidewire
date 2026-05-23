@@ -33,6 +33,16 @@ class SmartPipe:
         brokers because they came from the dest's own
         protected_clients list at addr-publish time.
 
+        Hint brokers may name hosts that ARE NOT in our local seed
+        server list (the peer's servers.json was fresher than ours,
+        or the peer's rendezvous ranking selected brokers ours
+        didn't even know about).  We MUST connect to those anyway
+        -- that's the whole point of the hint feature: bridge
+        non-overlap.  router.ensure_client() lazily constructs an
+        MQTTClient for an unseen (af, host, port) tuple, attaches
+        every msg_handler the router has ever seen, and registers
+        it in router.clients so subsequent lookups reuse it.
+
         Connects are run in parallel (asyncio.gather) so the total
         latency is max(T1..Tn) not T1+T2+..+Tn.  The per-broker
         connect_timeout is set below the outer asyncio.wait_for
@@ -46,9 +56,11 @@ class SmartPipe:
             port = hint.get("port")
             if af is None or not host or not port:
                 continue
-            af_clients = self.router.clients.get(af, {})
-            client = af_clients.get(host)
+            client = self.router.ensure_client(af, host, port)
             if client is None:
+                # ensure_client returns None only when our AFGroup
+                # doesn't support the hint's AF (no interface to
+                # bind from), e.g. v4-only NIC and a v6 hint.
                 continue
 
             to_try.append(client)
@@ -65,6 +77,15 @@ class SmartPipe:
             if result is client:
                 out.append(client)
 
+        log(fstr(
+            "[SMARTPIPE-HINT] dest={0} hints={1} tried={2} reachable={3}",
+            (
+                self.dest_pub_hex[:12],
+                len(self.hint_brokers),
+                len(to_try),
+                len(out),
+            ),
+        ))
         return out
 
     async def connect(self, msg_cb=None):

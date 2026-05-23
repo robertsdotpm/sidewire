@@ -110,26 +110,22 @@ class Router:
 
         self.clients = {IP4: {}, IP6: {}}
         self.recv_msg_ids = {}
+        # Remember every msg_handler ever attached so ensure_client() can
+        # replay them onto a freshly-built client (e.g. one constructed
+        # on demand for a peer's hint broker that wasn't in our seed
+        # server list).  Without this, late-bound clients never received
+        # inbound publish callbacks and broke the broker-hint fallback.
+        self.msg_handlers = []
+        if msg_handler:
+            self.msg_handlers.append(msg_handler)
         for af in (IP4, IP6):
             if not self.af_group.supports(af):
                 continue
             iface = self.af_group.for_af(af)
             for host in self.servers[af]:
-                self.clients[af][host] = MQTTClient(
-                    af,
-                    iface,
-                    (host, self.servers[af][host]["port"]),
-                    self.kp,
-                    get_time=get_time,
+                self.ensure_client(
+                    af, host, self.servers[af][host]["port"],
                 )
-
-                if msg_handler:
-                    self.clients[af][host].add_msg_handler(msg_handler)
-
-                # All clients share recv_msg_ids so duplicate detection works across them.
-                self.clients[af][host].recv_msg_ids = self.recv_msg_ids
-
-                self.clients[af][host].last_connect = None
 
         self.cache = {}
 
@@ -147,9 +143,38 @@ class Router:
 
     def add_msg_handler(self, msg_handler):
         """Register a message handler on all managed MQTT clients."""
+        self.msg_handlers.append(msg_handler)
         for af in self.clients:
             for host in self.clients[af]:
                 self.clients[af][host].add_msg_handler(msg_handler)
+
+    def ensure_client(self, af, host, port):
+        """Return self.clients[af][host], constructing it on first use.
+
+        Used both by __init__ (seed brokers from servers.json) and by
+        SmartPipe.resolve_hint_clients (peer-advertised hint brokers
+        that may not be in our seed list).  Fresh clients inherit
+        recv_msg_ids and every msg_handler ever registered so they
+        behave identically to seed clients on inbound traffic.
+
+        Returns None if the requested AF isn't supported by this
+        router's AFGroup (no usable interface to bind from).
+        """
+        if not self.af_group.supports(af):
+            return None
+        existing = self.clients[af].get(host)
+        if existing is not None:
+            return existing
+        iface = self.af_group.for_af(af)
+        client = MQTTClient(
+            af, iface, (host, port), self.kp, get_time=self.get_time,
+        )
+        for handler in self.msg_handlers:
+            client.add_msg_handler(handler)
+        client.recv_msg_ids = self.recv_msg_ids
+        client.last_connect = None
+        self.clients[af][host] = client
+        return client
 
     async def start(self):
         """Connect to the best MQTT servers for this node's own public key.
