@@ -1,6 +1,7 @@
 import struct
 from ecdsa import VerifyingKey, SECP256k1, util, BadSignatureError, MalformedPointError
 from aionetiface import h_to_b, to_b, to_h, to_s
+from aionetiface.utility.signing import ecdsa_sign_async, ecdsa_verify_async
 
 
 # Fixed binary sizes (bytes) for AppPacket wire format.
@@ -91,7 +92,10 @@ class AppPacket:
             + msg_bytes
         )
 
-        # Sign the binary representation.
+        # Sign the binary representation.  Sync path retained for
+        # callers in non-event-loop contexts; the hot-path publisher
+        # should call pack_async() instead so the ~2-10ms ECDSA sign
+        # runs on the default thread pool executor.
         sig = client.kp.private_key.sign(signed_msg, sigencode=util.sigencode_string)
         self.sig_hex = to_h(sig)
         compact_pk = client.kp.compact_public_key
@@ -100,9 +104,41 @@ class AppPacket:
         # Full wire layout: src_pk(33) + sig(64) + signed_msg.
         return compact_pk + sig + signed_msg
 
+    async def pack_async(self, client):
+        """Async wrapper around pack() that runs the ECDSA sign on the
+        default thread pool executor via the shared
+        aionetiface.utility.signing.ecdsa_sign_async helper.  Same
+        return value as pack().  Use on every outbound app packet to
+        keep the loop free for concurrent MQTT readers.
+        """
+        if self.msg is None:
+            self.msg = b""
+        msg_bytes = to_b(self.msg)
+        queue_id_bytes = h_to_b(self.queue_id_hex)
+        signed_msg = (
+            queue_id_bytes
+            + struct.pack("!I", self.seq_no)
+            + struct.pack("!Q", self.timestamp)
+            + struct.pack("!B", self.msg_type)
+            + msg_bytes
+        )
+        sig = await ecdsa_sign_async(
+            client.kp.private_key, signed_msg,
+            sigencode=util.sigencode_string,
+        )
+        self.sig_hex = to_h(sig)
+        compact_pk = client.kp.compact_public_key
+        self.src_pk_hex = to_h(compact_pk)
+        return compact_pk + sig + signed_msg
+
     @classmethod
     def unpack(cls, payload):
-        """Parse and verify a packed AppPacket wire buffer, returning None on any error."""
+        """Parse and verify a packed AppPacket wire buffer, returning None on any error.
+
+        Sync path retained for non-event-loop callers.  The hot-path
+        publish handler should use unpack_async() so the ~2-10ms ECDSA
+        verify runs on the default thread pool executor.
+        """
         if not isinstance(payload, (bytes, bytearray)):
             return None
         if len(payload) < MIN_PACKET_LEN:
@@ -121,6 +157,54 @@ class AppPacket:
             return None
 
         # Parse the signed section.
+        queue_id_bytes = signed_msg[QUEUE_ID_OFFSET:QUEUE_ID_OFFSET + QUEUE_ID_LEN]
+        seq_no_bytes = signed_msg[SEQ_NO_OFFSET:SEQ_NO_OFFSET + SEQ_NO_LEN]
+        timestamp_bytes = signed_msg[TIMESTAMP_OFFSET:TIMESTAMP_OFFSET + TIMESTAMP_LEN]
+        msg_type_byte = signed_msg[MSG_TYPE_OFFSET:MSG_TYPE_OFFSET + MSG_TYPE_LEN]
+        msg_bytes = signed_msg[MSG_OFFSET:]
+
+        seq_no = struct.unpack("!I", seq_no_bytes)[0]
+        timestamp = struct.unpack("!Q", timestamp_bytes)[0]
+        msg_type = struct.unpack("!B", msg_type_byte)[0]
+
+        return cls(
+            src_pk_hex=to_h(src_pk_bytes),
+            sig_hex=to_h(sig_bytes),
+            queue_id_hex=to_h(queue_id_bytes),
+            seq_no=seq_no,
+            timestamp=timestamp,
+            msg_type=msg_type,
+            msg=to_s(msg_bytes),
+        )
+
+    @classmethod
+    async def unpack_async(cls, payload):
+        """Async variant of unpack() that runs the ECDSA verify on the
+        default thread pool executor via the shared
+        aionetiface.utility.signing.ecdsa_verify_async helper.  Same
+        return shape as unpack() -- returns None on any verify /
+        decode failure, an AppPacket instance on success.  Use on every
+        inbound MQTT publish so the loop stays free for concurrent
+        readers.
+        """
+        if not isinstance(payload, (bytes, bytearray)):
+            return None
+        if len(payload) < MIN_PACKET_LEN:
+            return None
+
+        try:
+            src_pk_bytes = bytes(payload[:SRC_PK_LEN])
+            sig_bytes = bytes(payload[SIG_OFFSET:SIGNED_MSG_OFFSET])
+            signed_msg = bytes(payload[SIGNED_MSG_OFFSET:])
+
+            vk = VerifyingKey.from_string(src_pk_bytes, curve=SECP256k1)
+            await ecdsa_verify_async(
+                vk, sig_bytes, signed_msg,
+                sigdecode=util.sigdecode_string,
+            )
+        except (BadSignatureError, MalformedPointError, ValueError):
+            return None
+
         queue_id_bytes = signed_msg[QUEUE_ID_OFFSET:QUEUE_ID_OFFSET + QUEUE_ID_LEN]
         seq_no_bytes = signed_msg[SEQ_NO_OFFSET:SEQ_NO_OFFSET + SEQ_NO_LEN]
         timestamp_bytes = signed_msg[TIMESTAMP_OFFSET:TIMESTAMP_OFFSET + TIMESTAMP_LEN]

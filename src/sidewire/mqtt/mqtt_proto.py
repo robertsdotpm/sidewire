@@ -93,8 +93,10 @@ async def handle_publish(client, packet):
         ))
         return
 
-    # Verify signature and extract fields.
-    app_packet = AppPacket.unpack(payload)
+    # Verify signature and extract fields.  unpack_async runs the
+    # ECDSA verify (~2-10ms) on the default thread pool executor so
+    # the loop stays free for concurrent broker readers.
+    app_packet = await AppPacket.unpack_async(payload)
     if app_packet is None:
         log(fstr(
             "[MQTT-RX] handle_publish: AppPacket.unpack returned None (broker={0}; "
