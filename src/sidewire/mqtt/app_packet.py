@@ -111,6 +111,21 @@ class AppPacket:
         return value as pack().  Use on every outbound app packet to
         keep the loop free for concurrent MQTT readers.
         """
+        if len(self.queue_id_hex) != 64:
+            raise ValueError(
+                "queue_id_hex must be 64 hex chars, got {}".format(
+                    len(self.queue_id_hex),
+                )
+            )
+
+        # Mirror pack(): stamp creation time once if the caller didn't
+        # set one.  Without this an ACK packet constructed by
+        # queue_msg_async with timestamp=None crashes inside
+        # struct.pack("!Q", None) -- the exact failure in the
+        # async_wrap_errors traceback that bit us during refactoring.
+        if self.timestamp is None:
+            self.timestamp = int(client.get_time())
+
         if self.msg is None:
             self.msg = b""
         msg_bytes = to_b(self.msg)
