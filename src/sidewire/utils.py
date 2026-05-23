@@ -132,6 +132,7 @@ async def get_dest_clients(
     clients_map,
     n=4,
     max_servers=20,
+    cached_hints=None,
 ):
     """Discover up to n MQTT clients per AF that can reach the destination public key.
 
@@ -194,16 +195,54 @@ async def get_dest_clients(
     RETRY_WALK_CAP = 4.0
     retry_enabled = WALK_CAP < RETRY_WALK_CAP
 
+    # Index cached hints by (af, host) for O(1) lookup per AF below.
+    # Hints arrive sorted most-recently-successful first (load_for in
+    # broker_hint_cache sorts by ts desc).  We preserve that order
+    # when prepending so the parallel try_client gather launches the
+    # freshest brokers first -- they're statistically the most
+    # likely to still be alive.
+    cached_by_af = {}
+    if cached_hints:
+        for hint in cached_hints:
+            af = iana_to_af.get(int(hint["af"]), int(hint["af"]))
+            cached_by_af.setdefault(af, []).append((hint["host"], hint))
+
     async def walk_af(nic_af, cap):
         """Connect `needed` brokers for one address family, capped at `cap` seconds."""
         sorted_servers = af_buckets[nic_af]
         candidate_clients = []
+        seen_clients = set()
+
+        # Cached brokers first.  These are hosts that successfully
+        # became protected_clients on a previous startup -- give
+        # them a head start in the first-to-complete race.  If
+        # they're dead, the rendezvous tail behind them runs in
+        # the same gather and the walk completes within `cap`
+        # regardless.  Dedup by client identity so a cached
+        # broker that's also in the rendezvous top-N doesn't get
+        # two try_client tasks racing each other.
+        for host, _hint in cached_by_af.get(nic_af, []):
+            if nic_af not in clients_map or host not in clients_map[nic_af]:
+                # Cached broker no longer in our seed list (servers.json
+                # shrank).  Skip -- it can re-enter the cache only by
+                # being a current candidate in a future run.
+                continue
+            client = clients_map[nic_af][host]
+            if id(client) in seen_clients:
+                continue
+            seen_clients.add(id(client))
+            candidate_clients.append(client)
+
         for server in sorted_servers:
             af = iana_to_af.get(int(server["af"]), int(server["af"]))
             host = server["host"]
             if af not in clients_map or host not in clients_map[af]:
                 continue
-            candidate_clients.append(clients_map[af][host])
+            client = clients_map[af][host]
+            if id(client) in seen_clients:
+                continue
+            seen_clients.add(id(client))
+            candidate_clients.append(client)
 
         # needed = how many good brokers this AF wants, stepping up at
         # the 2 / 4 / 8 candidate-count thresholds: <2 -> 0 (skip the

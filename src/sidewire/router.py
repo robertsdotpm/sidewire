@@ -35,6 +35,11 @@ from aionetiface import AFGroup, IP4, IP6, Interface, async_wrap_errors, fstr, l
 from .mqtt import MQTTClient
 from .smart_pipe import SmartPipe
 from .utils import get_dest_clients, get_mqtt_server_list
+from .broker_hint_cache import (
+    load_for as load_broker_hints,
+    store_for as store_broker_hints,
+    client_to_hint,
+)
 
 
 # An MQTT pipe is closed if no queue_msg call landed on it within this
@@ -182,15 +187,40 @@ class Router:
         The clients returned here form the *first loaded group* -- they
         carry our inbound subscription, so the idle-closer below leaves
         them alone for the Router's lifetime regardless of send activity.
+
+        Reads the persistent broker-hint cache to bias the candidate
+        order: brokers that were successful on a previous startup get
+        prepended to the rendezvous candidate list per AF, so the
+        first-to-complete race in walk_af launches them ahead of
+        rendezvous-derived candidates.  When fresh + alive they win
+        the race (warm startups connect faster); when dead the
+        rendezvous tail behind them runs in the same gather and the
+        walk completes within broker_walk_cap regardless.
         """
+        cached_hints = load_broker_hints(self.kp.public_key_hex)
         clients = await get_dest_clients(
-            self.af_group, self.kp.public_key_hex, self.servers, self.clients
+            self.af_group, self.kp.public_key_hex, self.servers, self.clients,
+            cached_hints=cached_hints,
         )
 
         # Pin these as the protected (inbound) set. Future start() calls
         # would extend, not replace, but in practice start() is one-shot.
         for client in clients:
             self.protected_clients.add(client)
+
+        # Persist the successful set so the next startup can use it to
+        # bias the rendezvous order.  Replaces (not merges) the previous
+        # cache entry for this pub_key -- a broker that was cached but
+        # didn't survive this walk is correctly evicted.  Best-effort:
+        # disk write failures are swallowed inside store_broker_hints
+        # since the cache is purely an optimisation.
+        hints_to_store = []
+        for client in clients:
+            hint = client_to_hint(client)
+            if hint is not None:
+                hints_to_store.append(hint)
+        if hints_to_store:
+            store_broker_hints(self.kp.public_key_hex, hints_to_store)
 
         self.cache_clients(self.kp.public_key_hex, clients)
 
