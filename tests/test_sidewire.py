@@ -1,29 +1,7 @@
 from aionetiface import *
-from aionetiface import IP4, UDP, get_infra
 from aionetiface.testing import AsyncTestCase
 
-
-def pick_mqtt_servers(count=5):
-    """Return [(host, port), ...] for `count` MQTT servers from get_infra."""
-    out = []
-    try:
-        groups = get_infra(IP4, UDP, "MQTT", no=count)
-    except Exception:
-        groups = []
-    for group in groups:
-        if not group:
-            continue
-        s = group[0]
-        host = (s.get("fqns") or [s.get("ip")])[0]
-        port = s.get("port", 1883)
-        if host:
-            out.append((host, port))
-    if not out:
-        out = [
-            ("ovh1.p2pd.net", 1883),
-            ("test.mosquitto.org", 1883),
-        ]
-    return out
+from mqtt_test_helpers import pick_mqtt_servers
 
 
 class TestSignaling(AsyncTestCase):
