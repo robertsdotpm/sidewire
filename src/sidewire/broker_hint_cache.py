@@ -32,6 +32,7 @@ Failure modes:
 import os
 import time
 
+from aionetiface.install import get_aionetiface_install_root
 from aionetiface.utility.jsonfile import load_json_or_default, atomic_write_json
 
 
@@ -41,9 +42,7 @@ def cache_file_path():
     Lives at ~/aionetiface/broker_hint_cache.json so it sits next to
     servers.json and inherits the same install-script handling.
     """
-    return os.path.join(
-        os.path.expanduser("~"), "aionetiface", "broker_hint_cache.json",
-    )
+    return os.path.join(get_aionetiface_install_root(), "broker_hint_cache.json")
 
 
 def load_all():
