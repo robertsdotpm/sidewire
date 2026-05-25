@@ -8,7 +8,7 @@ when done.
 import asyncio
 import random
 import time
-from aionetiface import Pipe, TCP, SUB_ALL, rand_plain, to_hs, log, fstr
+from aionetiface import Pipe, TCP, rand_plain, to_hs, log, fstr
 from .utils import reset_session_state
 from .mqtt_reader import mqtt_packet_reader
 from .mqtt_msgs import build_connect
@@ -95,14 +95,12 @@ async def mqtt_connect(self, keep_alive):
         """Forward incoming TCP chunks to the MQTT packet reader for this client."""
         return await mqtt_packet_reader(self, chunk, client_tup, pipe)
 
-    # Add handler to read chunks.
     # Pipe.connect with a dest and no msg_cb subscribed the stream to
-    # SUB_ALL so the CONNACK could be pulled via recv_n above.  Now that
-    # we're switching to callback dispatch, drop that subscription --
-    # otherwise every inbound MQTT chunk is also appended to the
-    # SUB_ALL queue with no reader, growing until max_qsize.
-    pipe.unsubscribe(SUB_ALL)
-    pipe.add_msg_cb(handle_chunks_async)
+    # SUB_ALL so the CONNACK could be pulled via recv_n above.  Hand
+    # off to callback dispatch: handoff_to_cb atomically replays any
+    # frames still buffered on the SUB_ALL queue through the cb,
+    # drops the subscription, and registers the cb for future frames.
+    pipe.handoff_to_cb(handle_chunks_async)
 
     # Public Key Subscription
     try:
