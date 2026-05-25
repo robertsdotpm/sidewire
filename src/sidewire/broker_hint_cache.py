@@ -29,9 +29,10 @@ Failure modes:
 - Disk I/O errors: log + treat as cache miss; cache is purely
   optimisation, never a correctness dependency.
 """
-import json
 import os
 import time
+
+from aionetiface.utility.jsonfile import load_json_or_default, atomic_write_json
 
 
 def cache_file_path():
@@ -47,16 +48,9 @@ def cache_file_path():
 
 def load_all():
     """Return the full cache dict (pub_key -> entry) or {} on any error."""
-    path = cache_file_path()
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as fp:
-            data = json.load(fp)
-        if isinstance(data, dict):
-            return data
-    except (OSError, ValueError):
-        pass
+    data = load_json_or_default(cache_file_path(), dict)
+    if isinstance(data, dict):
+        return data
     return {}
 
 
@@ -139,12 +133,9 @@ def store_for(pub_key_hex, brokers, now=None):
     path = cache_file_path()
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fp:
-            json.dump(data, fp, indent=2, sort_keys=True)
-        os.replace(tmp, path)
     except OSError:
         pass
+    atomic_write_json(path, data, indent=2, sort_keys=True)
 
 
 def client_to_hint(client):
