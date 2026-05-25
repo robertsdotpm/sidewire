@@ -111,41 +111,16 @@ async def try_client(
     only set inside the except branch, so successful (or recovered)
     connects don't poison the per-broker cache.
     """
-    log(fstr("[TRY-CLIENT] host={0} af={1} already_connected={2}",
-        (client.host, client.af,
-         client.dispatcher_task is not None and not client.dispatcher_task.done())))
     if client.dispatcher_task is None:
         now = client.get_time()
         if client.last_connect is not None:
             if (now - client.last_connect) < retry_duration:
-                log(fstr(
-                    "[TRY-CLIENT] host={0} rate-limited ({1}s remaining)",
-                    (client.host, "%.0f" % (retry_duration - (now - client.last_connect))),
-                ))
                 return None
-        log(fstr("[TRY-CLIENT] host={0} connecting (timeout={1}s)",
-            (client.host, connect_timeout)))
         try:
             await asyncio.wait_for(client.connect(), connect_timeout)
         except (OSError, ConnectionError, asyncio.TimeoutError) as exc:
             client.last_connect = now
-            # One-line summary instead of full traceback.  This fires
-            # for every MQTT broker that fails in the fallback list --
-            # network design, not a bug -- so a 10-line traceback per
-            # attempt is just noise.  The exception class + str() are
-            # enough to tell ConnectionRefused from TimeoutError when
-            # debugging.
-            log(fstr(
-                "[TRY-CLIENT] host={0} connect failed: {1}: {2}",
-                (client.host, type(exc).__name__, str(exc) or "(no message)"),
-            ))
             return None
-
-    # Guard against zombie clients: dispatcher_task is non-None but the
-    # task already completed (happens when is_closed was set before the
-    # dispatcher started -- fixed in close_idle_clients, but log if seen).
-    if client.dispatcher_task is not None and client.dispatcher_task.done():
-        log(fstr("[TRY-CLIENT] host={0} zombie dispatcher_task detected (done but non-None)", (client.host,)))
 
     return client
 
@@ -157,6 +132,7 @@ async def get_dest_clients(
     clients_map,
     n=4,
     max_servers=20,
+    cached_hints=None,
 ):
     """Discover up to n MQTT clients per AF that can reach the destination public key.
 
@@ -185,10 +161,7 @@ async def get_dest_clients(
     dest_t0 = time.monotonic()
 
     def dest_stage(name):
-        log(fstr(
-            "[ROUTER-TIME] t={0}ms stage={1}",
-            (int((time.monotonic() - dest_t0) * 1000), name),
-        ))
+        pass
 
     dest_stage("get_dest_enter")
     af_buckets = rendezvous_hash(nic, dest_pub_hex, servers)
@@ -213,17 +186,63 @@ async def get_dest_clients(
     # MQTT handshake alone runs ~8-12s, so a 1s cap there would admit
     # zero brokers and strand signalling.
     WALK_CAP = os_net_timeouts()["broker_walk_cap"]
+    # Zero-broker fallback budget.  Skip the retry entirely when the
+    # primary cap is already >= 4s (Vista=6, XP=14) -- those OSes have
+    # generous-enough first-pass budgets that a zero result means
+    # nothing is reachable, not "we didn't wait long enough".  For
+    # the LAN-fast default (2s) and Windows (4s) we lift the cap to
+    # 4s for one retry before declaring total signaling outage.
+    RETRY_WALK_CAP = 4.0
+    retry_enabled = WALK_CAP < RETRY_WALK_CAP
 
-    async def walk_af(nic_af):
-        """Connect `needed` brokers for one address family, capped at 1s."""
+    # Index cached hints by (af, host) for O(1) lookup per AF below.
+    # Hints arrive sorted most-recently-successful first (load_for in
+    # broker_hint_cache sorts by ts desc).  We preserve that order
+    # when prepending so the parallel try_client gather launches the
+    # freshest brokers first -- they're statistically the most
+    # likely to still be alive.
+    cached_by_af = {}
+    if cached_hints:
+        for hint in cached_hints:
+            af = iana_to_af.get(int(hint["af"]), int(hint["af"]))
+            cached_by_af.setdefault(af, []).append((hint["host"], hint))
+
+    async def walk_af(nic_af, cap):
+        """Connect `needed` brokers for one address family, capped at `cap` seconds."""
         sorted_servers = af_buckets[nic_af]
         candidate_clients = []
+        seen_clients = set()
+
+        # Cached brokers first.  These are hosts that successfully
+        # became protected_clients on a previous startup -- give
+        # them a head start in the first-to-complete race.  If
+        # they're dead, the rendezvous tail behind them runs in
+        # the same gather and the walk completes within `cap`
+        # regardless.  Dedup by client identity so a cached
+        # broker that's also in the rendezvous top-N doesn't get
+        # two try_client tasks racing each other.
+        for host, _hint in cached_by_af.get(nic_af, []):
+            if nic_af not in clients_map or host not in clients_map[nic_af]:
+                # Cached broker no longer in our seed list (servers.json
+                # shrank).  Skip -- it can re-enter the cache only by
+                # being a current candidate in a future run.
+                continue
+            client = clients_map[nic_af][host]
+            if id(client) in seen_clients:
+                continue
+            seen_clients.add(id(client))
+            candidate_clients.append(client)
+
         for server in sorted_servers:
             af = iana_to_af.get(int(server["af"]), int(server["af"]))
             host = server["host"]
             if af not in clients_map or host not in clients_map[af]:
                 continue
-            candidate_clients.append(clients_map[af][host])
+            client = clients_map[af][host]
+            if id(client) in seen_clients:
+                continue
+            seen_clients.add(id(client))
+            candidate_clients.append(client)
 
         # needed = how many good brokers this AF wants, stepping up at
         # the 2 / 4 / 8 candidate-count thresholds: <2 -> 0 (skip the
@@ -236,10 +255,6 @@ async def get_dest_clients(
         needed = min(3, max(0, serv_no.bit_length() - 1))
 
         if needed == 0:
-            log(fstr(
-                "[GET-DEST-CLIENTS] dest={0} af={1} candidates={2} needed=0 found=0",
-                (dest_pub_hex[:12], nic_af, serv_no),
-            ))
             return []
 
         # Fire up to 10 connects; collect first-to-complete until
@@ -259,24 +274,20 @@ async def get_dest_clients(
                         return
 
         try:
-            await asyncio.wait_for(collect(), timeout=WALK_CAP)
+            await asyncio.wait_for(collect(), timeout=cap)
         except asyncio.TimeoutError:
-            # 1s cap hit -- take whatever connected so far.
+            # cap hit -- take whatever connected so far.
             pass
         finally:
             # Cancel the still-pending connects (laggards / dead
             # brokers).  Not awaited: awaiting their cancellation
-            # cleanup could push the walk past the 1s cap.  They
+            # cleanup could push the walk past the cap.  They
             # unwind and close their own half-open pipes in the
             # background.
             for t in tasks:
                 if not t.done():
                     t.cancel()
 
-        log(fstr(
-            "[GET-DEST-CLIENTS] dest={0} af={1} candidates={2} needed={3} found={4}",
-            (dest_pub_hex[:12], nic_af, serv_no, needed, len(af_found)),
-        ))
         return af_found
 
     # Run the per-AF walks concurrently -- they are independent, so
@@ -285,16 +296,54 @@ async def get_dest_clients(
     af_keys = list(af_buckets)
     dest_stage("walks_start")
     per_af_results = await asyncio.gather(
-        *[walk_af(nic_af) for nic_af in af_keys]
+        *[walk_af(nic_af, WALK_CAP) for nic_af in af_keys]
     )
     dest_stage("walks_done")
     for af_found in per_af_results:
         found_clients.extend(af_found)
 
-    log(fstr(
-        "[GET-DEST-CLIENTS] dest={0} total={1}",
-        (dest_pub_hex[:12], len(found_clients)),
-    ))
+    # Zero-broker escape hatch: the first walk gave us nothing across
+    # every AF.  Rather than let the node start with
+    # protected_clients=0 (no MQTT subscriptions = no inbound signal
+    # path = total signaling outage), retry once at the doubled cap.
+    # The clients_map state is preserved across the retry; try_client
+    # short-circuits when an MQTTClient is already connected, so any
+    # in-flight CONNECT from the first pass either completed in the
+    # interim (returns immediately) or gets a fresh connect attempt
+    # under the larger budget.
+    if not found_clients:
+        if retry_enabled:
+            log(fstr(
+                "[GET-DEST-CLIENTS] dest={0} first walk admitted 0 brokers "
+                "(cap={1}s); retrying once at {2}s before giving up",
+                (dest_pub_hex[:12], WALK_CAP, RETRY_WALK_CAP),
+            ))
+            per_af_results = await asyncio.gather(
+                *[walk_af(nic_af, RETRY_WALK_CAP) for nic_af in af_keys]
+            )
+            for af_found in per_af_results:
+                found_clients.extend(af_found)
+            if not found_clients:
+                log(fstr(
+                    "[GET-DEST-CLIENTS] dest={0} retry at {1}s STILL admitted "
+                    "0 brokers -- node will start with no subscriptions and "
+                    "cannot receive inbound signal until a future walk succeeds.",
+                    (dest_pub_hex[:12], RETRY_WALK_CAP),
+                ))
+            else:
+                log(fstr(
+                    "[GET-DEST-CLIENTS] dest={0} retry recovered {1} broker(s)",
+                    (dest_pub_hex[:12], len(found_clients)),
+                ))
+        else:
+            log(fstr(
+                "[GET-DEST-CLIENTS] dest={0} walk at {1}s admitted 0 brokers "
+                "and primary cap already >= 4s; skipping retry. Node will "
+                "start with no subscriptions and cannot receive inbound "
+                "signal until a future walk succeeds.",
+                (dest_pub_hex[:12], WALK_CAP),
+            ))
+
     return found_clients
 
 

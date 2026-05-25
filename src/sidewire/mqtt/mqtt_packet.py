@@ -71,22 +71,6 @@ def mqtt_build_header(remaining_length, packet_type, flags):
     return bytes([first_byte]) + mqtt_encode_varint(remaining_length)
 
 
-def mqtt_parse_puback(packet):
-    """
-    Parses a PUBACK packet to extract the 2-byte Packet ID.
-    Expected packet.body is usually the 2-byte Variable Header.
-    """
-    body = packet.body
-
-    # A PUBACK variable header must be exactly 2 bytes.
-    if len(body) < 2:
-        return None
-
-    # Return the raw 2 bytes as the packet_id
-    packet_id = body[:2]
-    return packet_id
-
-
 def mqtt_parse_publish(
     packet,
 ):

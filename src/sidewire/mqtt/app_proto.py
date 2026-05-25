@@ -1,5 +1,6 @@
 import hashlib
 from aionetiface import async_wrap_errors, log_exception, to_b
+from aionetiface.utility.signing import sha256_hex_async
 from .mqtt_defs import MsgEnum
 from .utils import get_msg_from_queue
 
@@ -44,7 +45,10 @@ async def process_app_msg(client, app_packet):
 
     # Don't allow handlers to be called for msg portions that have
     # already been processed -- we raise an error in queue func too.
-    msg_hash = hashlib.sha256(to_b(msg)).hexdigest()
+    # SHA256 via the shared aionetiface.utility.signing helper so the
+    # loop stays free for concurrent MQTT readers; the digest is
+    # payload-size-proportional and runs on every inbound publish.
+    msg_hash = await sha256_hex_async(to_b(msg))
     if msg_hash not in client.recv_msg_ids:
         # Stamp before awaiting handlers so concurrent clients sharing
         # recv_msg_ids don't slip past the check during an await yield.
@@ -54,9 +58,11 @@ async def process_app_msg(client, app_packet):
         for msg_handler in client.msg_handlers:
             await async_wrap_errors(msg_handler(msg, src_pk, queue_id, client))
 
-    # Send Application ACK back to sender
+    # Send Application ACK back to sender.  Async variant offloads
+    # the ECDSA sign to the default thread pool executor so the
+    # MQTT-reader loop isn't stalled per inbound MSG.
     try:
-        client.queue_msg("ack", src_pk, queue_id, MsgEnum.MSGACK, seq_no=seq_no)
+        await client.queue_msg_async("ack", src_pk, queue_id, MsgEnum.MSGACK, seq_no=seq_no)
     except (ValueError, KeyError):
         log_exception()
 

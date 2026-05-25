@@ -35,6 +35,11 @@ from aionetiface import AFGroup, IP4, IP6, Interface, async_wrap_errors, fstr, l
 from .mqtt import MQTTClient
 from .smart_pipe import SmartPipe
 from .utils import get_dest_clients, get_mqtt_server_list
+from .broker_hint_cache import (
+    load_for as load_broker_hints,
+    store_for as store_broker_hints,
+    client_to_hint,
+)
 
 
 # An MQTT pipe is closed if no queue_msg call landed on it within this
@@ -110,26 +115,22 @@ class Router:
 
         self.clients = {IP4: {}, IP6: {}}
         self.recv_msg_ids = {}
+        # Remember every msg_handler ever attached so ensure_client() can
+        # replay them onto a freshly-built client (e.g. one constructed
+        # on demand for a peer's hint broker that wasn't in our seed
+        # server list).  Without this, late-bound clients never received
+        # inbound publish callbacks and broke the broker-hint fallback.
+        self.msg_handlers = []
+        if msg_handler:
+            self.msg_handlers.append(msg_handler)
         for af in (IP4, IP6):
             if not self.af_group.supports(af):
                 continue
             iface = self.af_group.for_af(af)
             for host in self.servers[af]:
-                self.clients[af][host] = MQTTClient(
-                    af,
-                    iface,
-                    (host, self.servers[af][host]["port"]),
-                    self.kp,
-                    get_time=get_time,
+                self.ensure_client(
+                    af, host, self.servers[af][host]["port"],
                 )
-
-                if msg_handler:
-                    self.clients[af][host].add_msg_handler(msg_handler)
-
-                # All clients share recv_msg_ids so duplicate detection works across them.
-                self.clients[af][host].recv_msg_ids = self.recv_msg_ids
-
-                self.clients[af][host].last_connect = None
 
         self.cache = {}
 
@@ -147,9 +148,38 @@ class Router:
 
     def add_msg_handler(self, msg_handler):
         """Register a message handler on all managed MQTT clients."""
+        self.msg_handlers.append(msg_handler)
         for af in self.clients:
             for host in self.clients[af]:
                 self.clients[af][host].add_msg_handler(msg_handler)
+
+    def ensure_client(self, af, host, port):
+        """Return self.clients[af][host], constructing it on first use.
+
+        Used both by __init__ (seed brokers from servers.json) and by
+        SmartPipe.resolve_hint_clients (peer-advertised hint brokers
+        that may not be in our seed list).  Fresh clients inherit
+        recv_msg_ids and every msg_handler ever registered so they
+        behave identically to seed clients on inbound traffic.
+
+        Returns None if the requested AF isn't supported by this
+        router's AFGroup (no usable interface to bind from).
+        """
+        if not self.af_group.supports(af):
+            return None
+        existing = self.clients[af].get(host)
+        if existing is not None:
+            return existing
+        iface = self.af_group.for_af(af)
+        client = MQTTClient(
+            af, iface, (host, port), self.kp, get_time=self.get_time,
+        )
+        for handler in self.msg_handlers:
+            client.add_msg_handler(handler)
+        client.recv_msg_ids = self.recv_msg_ids
+        client.last_connect = None
+        self.clients[af][host] = client
+        return client
 
     async def start(self):
         """Connect to the best MQTT servers for this node's own public key.
@@ -157,20 +187,40 @@ class Router:
         The clients returned here form the *first loaded group* -- they
         carry our inbound subscription, so the idle-closer below leaves
         them alone for the Router's lifetime regardless of send activity.
-        """
-        clients = await get_dest_clients(
-            self.af_group, self.kp.public_key_hex, self.servers, self.clients
-        )
 
-        log(fstr(
-            "[ROUTER-START] pub_key={0} protected_clients={1}",
-            (self.kp.public_key_hex[:12], len(clients)),
-        ))
+        Reads the persistent broker-hint cache to bias the candidate
+        order: brokers that were successful on a previous startup get
+        prepended to the rendezvous candidate list per AF, so the
+        first-to-complete race in walk_af launches them ahead of
+        rendezvous-derived candidates.  When fresh + alive they win
+        the race (warm startups connect faster); when dead the
+        rendezvous tail behind them runs in the same gather and the
+        walk completes within broker_walk_cap regardless.
+        """
+        cached_hints = load_broker_hints(self.kp.public_key_hex)
+        clients = await get_dest_clients(
+            self.af_group, self.kp.public_key_hex, self.servers, self.clients,
+            cached_hints=cached_hints,
+        )
 
         # Pin these as the protected (inbound) set. Future start() calls
         # would extend, not replace, but in practice start() is one-shot.
         for client in clients:
             self.protected_clients.add(client)
+
+        # Persist the successful set so the next startup can use it to
+        # bias the rendezvous order.  Replaces (not merges) the previous
+        # cache entry for this pub_key -- a broker that was cached but
+        # didn't survive this walk is correctly evicted.  Best-effort:
+        # disk write failures are swallowed inside store_broker_hints
+        # since the cache is purely an optimisation.
+        hints_to_store = []
+        for client in clients:
+            hint = client_to_hint(client)
+            if hint is not None:
+                hints_to_store.append(hint)
+        if hints_to_store:
+            store_broker_hints(self.kp.public_key_hex, hints_to_store)
 
         self.cache_clients(self.kp.public_key_hex, clients)
 
@@ -286,11 +336,6 @@ class Router:
         bug. Falls back to rendezvous discovery if no hints work
         (or are passed).
         """
-        log(fstr(
-            "[ROUTER-PIPE] dest={0} hint_count={1} use_cache={2}",
-            (dest_pub_hex[:12], len(hint_brokers or []), use_cache),
-        ))
-
         now = self.get_time()
         cached_clients = None  # type: Optional[List[Any]]
 
@@ -299,31 +344,11 @@ class Router:
             age = now - entry["updated"]
             if age < expiry:
                 cached_clients = entry["clients"]
-                log(fstr(
-                    "[ROUTER-PIPE] cache HIT dest={0} age_s={1} clients={2}",
-                    (dest_pub_hex[:12], int(age), len(cached_clients or [])),
-                ))
-            else:
-                log(fstr(
-                    "[ROUTER-PIPE] cache STALE dest={0} age_s={1} expiry_s={2}",
-                    (dest_pub_hex[:12], int(age), expiry),
-                ))
-        elif use_cache:
-            log(fstr(
-                "[ROUTER-PIPE] cache MISS dest={0} (no entry)",
-                (dest_pub_hex[:12],),
-            ))
 
         smart_pipe = SmartPipe(
             self, dest_pub_hex, clients=cached_clients, hint_brokers=hint_brokers,
         )
         await smart_pipe.connect()
-
-        log(fstr(
-            "[ROUTER-PIPE] dest={0} clients={1}",
-            (dest_pub_hex[:12], len(smart_pipe.clients)),
-        ))
-
         if use_cache and cached_clients is None:
             self.cache_clients(dest_pub_hex, smart_pipe.clients)
 

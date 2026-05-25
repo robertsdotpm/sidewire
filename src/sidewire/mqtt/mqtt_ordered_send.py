@@ -99,3 +99,65 @@ def ordered_ack_send(
 
     # Caller can await ack if they want.
     return (queue_id_hex, seq_no), app_ack
+
+
+async def ordered_ack_send_async(
+    client,
+    msg,
+    dest_pk_hex,
+    queue_id_hex,
+    msg_type=MsgEnum.MSG,
+    seq_no=None,
+):
+    """Async variant of ordered_ack_send that runs the ECDSA sign on
+    the default thread pool executor via AppPacket.pack_async.
+
+    Use this from `async def` callers (e.g. process_app_msg's per-
+    message ACK send) to keep the event loop free for ~2-10ms per
+    publish that would otherwise be spent signing.
+
+    Same return shape: ((queue_id_hex, seq_no), app_ack_future).
+    """
+    if len(queue_id_hex) != 64:
+        raise ValueError("queue_id_hex must be 64 hex chars, got {}".format(len(queue_id_hex)))
+    if len(dest_pk_hex) != 66:
+        raise ValueError("dest_pk_hex must be 66 hex chars, got {}".format(len(dest_pk_hex)))
+
+    if msg_type == MsgEnum.MSG:
+        sent_msg_id = hashlib.sha256(to_b(msg)).hexdigest()
+        if sent_msg_id in client.sent_msg_ids:
+            er = "msg id in sent msg ids in ordered send (async), is this intended? "
+            er += sent_msg_id
+            log(er)
+        else:
+            client.sent_msg_ids[sent_msg_id] = client.get_time()
+
+    if queue_id_hex not in client.msg_queues[msg_type]:
+        client.msg_queues[msg_type][queue_id_hex] = {}
+
+    if seq_no is None:
+        existing = client.msg_queues[msg_type][queue_id_hex]
+        seq_no = (max(existing.keys()) + 1) if existing else 0
+
+    packet = AppPacket(
+        queue_id_hex=queue_id_hex, seq_no=seq_no, msg_type=msg_type, msg=msg
+    )
+    # The only behavioural difference vs ordered_ack_send: pack_async
+    # offloads the ECDSA sign to the default thread pool executor.
+    out = await packet.pack_async(client)
+
+    if seq_no in client.msg_queues[msg_type][queue_id_hex]:
+        existing = client.msg_queues[msg_type][queue_id_hex][seq_no]
+        return (queue_id_hex, seq_no), existing["app_ack"]
+
+    app_ack = asyncio.Future()
+    client.msg_queues[msg_type][queue_id_hex][seq_no] = {
+        "app_ack": app_ack,
+        "dest_pk_hex": dest_pk_hex,
+        "seq_no": seq_no,
+        "out": out,
+        "updated": 0,
+        "created": client.get_time(),
+    }
+
+    return (queue_id_hex, seq_no), app_ack

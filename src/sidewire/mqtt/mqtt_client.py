@@ -60,7 +60,7 @@ from aionetiface import (
 )
 from .mqtt_defs import MQTT_KEEP_ALIVE, MsgEnum, MQTTEnum
 from .utils import packet_ack_future
-from .mqtt_ordered_send import ordered_ack_send
+from .mqtt_ordered_send import ordered_ack_send, ordered_ack_send_async
 from .mqtt_dispatch import dispatcher
 from .mqtt_connect import mqtt_connect
 from .mqtt_msgs import build_subscribe, build_publish, build_disconnect
@@ -180,7 +180,6 @@ class MQTTClient:
         """Connect to the MQTT server and start the background message dispatcher."""
         # Re-entry guard.
         if self.dispatcher_task and not self.dispatcher_task.done():
-            log(fstr("[MQTT-CLIENT-CONNECT] host={0} re-entry: dispatcher already running (task_done={1})", (self.host, self.dispatcher_task.done())))
             return self.pipe
 
         # Store for use in timestamp validation on receive.
@@ -242,6 +241,27 @@ class MQTTClient:
         # the dispatcher retries in the background.
         self.last_send = self.get_time()
         return ordered_ack_send(self, msg, dest_pk_hex, queue_id_hex, msg_type, seq_no)
+
+    async def queue_msg_async(
+        self,
+        msg,
+        dest_pk_hex,
+        queue_id_hex=None,
+        msg_type=MsgEnum.MSG,
+        seq_no=None,
+    ):
+        """Async variant of queue_msg that offloads the ECDSA sign to
+        the default thread pool executor via ordered_ack_send_async.
+
+        Use from `async def` callers on hot paths (every inbound MSG
+        triggers a queue_msg call to send the ACK back -- that's the
+        primary motivator).  Same return shape as queue_msg.
+        """
+        queue_id_hex = queue_id_hex or to_h(rand_b(32))
+        self.last_send = self.get_time()
+        return await ordered_ack_send_async(
+            self, msg, dest_pk_hex, queue_id_hex, msg_type, seq_no,
+        )
 
     async def send_probe(
         self,
@@ -430,10 +450,7 @@ class MQTTClient:
         """Cleanly shut down the dispatcher, send DISCONNECT, and close the pipe."""
         # Already closed.
         if self.is_closed.is_set():
-            log(fstr("[MQTT-CLIENT-CLOSE] host={0} already closed, skipping", (self.host,)))
             return
-
-        log(fstr("[MQTT-CLIENT-CLOSE] host={0} closing", (self.host,)))
 
         # Indicate closed to block other callers.
         self.is_closed.set()
