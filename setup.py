@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="sidewire",
-    version="0.1.7",
+    version="0.1.9",
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     install_requires=["aionetiface", "ecdsa"],

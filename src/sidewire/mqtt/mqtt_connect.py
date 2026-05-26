@@ -95,8 +95,12 @@ async def mqtt_connect(self, keep_alive):
         """Forward incoming TCP chunks to the MQTT packet reader for this client."""
         return await mqtt_packet_reader(self, chunk, client_tup, pipe)
 
-    # Add handler to read chunks.
-    pipe.add_msg_cb(handle_chunks_async)
+    # Pipe.connect with a dest and no msg_cb subscribed the stream to
+    # SUB_ALL so the CONNACK could be pulled via recv_n above.  Hand
+    # off to callback dispatch: handoff_to_cb atomically replays any
+    # frames still buffered on the SUB_ALL queue through the cb,
+    # drops the subscription, and registers the cb for future frames.
+    pipe.handoff_to_cb(handle_chunks_async)
 
     # Public Key Subscription
     try:
