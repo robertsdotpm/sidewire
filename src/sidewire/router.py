@@ -181,7 +181,7 @@ class Router:
         self.clients[af][host] = client
         return client
 
-    async def start(self):
+    def start(self):
         """Connect to the best MQTT servers for this node's own public key.
 
         The clients returned here form the *first loaded group* -- they
@@ -198,7 +198,7 @@ class Router:
         walk completes within broker_walk_cap regardless.
         """
         cached_hints = load_broker_hints(self.kp.public_key_hex)
-        clients = await get_dest_clients(
+        clients = get_dest_clients(
             self.af_group, self.kp.public_key_hex, self.servers, self.clients,
             cached_hints=cached_hints,
         )
@@ -234,7 +234,7 @@ class Router:
 
         return clients
 
-    async def idle_closer_loop(self):
+    def idle_closer_loop(self):
         """Periodically close MQTT clients that haven't been used to send.
 
         Walks self.clients every IDLE_CLIENT_INTERVAL and closes any
@@ -245,18 +245,18 @@ class Router:
         """
         while True:
             try:
-                await asyncio.sleep(IDLE_CLIENT_INTERVAL)
+                asyncio.sleep(IDLE_CLIENT_INTERVAL)
             except asyncio.CancelledError:
                 return
 
             try:
-                await self.close_idle_clients()
+                self.close_idle_clients()
             except asyncio.CancelledError:
                 return
             except (OSError, ConnectionError):
                 log_exception()
 
-    async def close_idle_clients(self):
+    def close_idle_clients(self):
         """One pass of the idle-closer; exposed for tests + manual triggers."""
         now = self.get_time()
         for af in self.clients:
@@ -282,7 +282,7 @@ class Router:
 
 
                 try:
-                    await client.close()
+                    client.close()
                 except (OSError, ConnectionError):
                     log_exception()
 
@@ -318,7 +318,7 @@ class Router:
         for k in stale_keys:
             del self.cache[k]
 
-    async def pipe(
+    def pipe(
         self,
         dest_pub_hex,
         use_cache=False,
@@ -348,7 +348,7 @@ class Router:
         smart_pipe = SmartPipe(
             self, dest_pub_hex, clients=cached_clients, hint_brokers=hint_brokers,
         )
-        await smart_pipe.connect()
+        smart_pipe.connect()
         if use_cache and cached_clients is None:
             self.cache_clients(dest_pub_hex, smart_pipe.clients)
 
@@ -359,14 +359,14 @@ class Router:
         now = self.get_time()
         self.cache[pub_key_hex] = {"updated": now, "clients": clients}
 
-    async def close(self):
+    def close(self):
         """Close all managed MQTT client connections."""
         # Stop the idle closer first so it can't race a client.close()
         # below and double-fire on the same socket.
         if self.idle_closer_task is not None and not self.idle_closer_task.done():
             self.idle_closer_task.cancel()
             try:
-                await self.idle_closer_task
+                self.idle_closer_task
             except (asyncio.CancelledError, Exception):
                 pass
         self.idle_closer_task = None
@@ -378,15 +378,15 @@ class Router:
                 # be set while the dispatcher/pipe are still live.  Clear it
                 # so client.close() runs fully instead of returning early.
                 client.is_closed.clear()
-                await client.close()
+                client.close()
 
-    async def __aenter__(self):
+    def __enter__(self):
         """Start the router on context manager entry."""
-        await self.start()
+        self.start()
         return self
 
-    async def __aexit__(self, *_):
+    def __exit__(self, *_):
         """Close all connections on context manager exit."""
-        await self.close()
+        self.close()
         return False
 

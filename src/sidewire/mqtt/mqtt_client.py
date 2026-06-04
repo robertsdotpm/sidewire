@@ -44,6 +44,7 @@ Everything ended up under 700 lines of code which I think is pretty good!
 import hashlib
 import asyncio
 import time
+import runloom
 from aionetiface import (
     IP4,
     Interface,
@@ -168,7 +169,7 @@ class MQTTClient:
 
     # Connect to MQTT server and subscribe to our own pub key hex topic.
     # Also will start a background task that dispatches messages from self.send.
-    async def connect(
+    def connect(
         self,
         republish_duration=60,
         interval=2,
@@ -187,7 +188,7 @@ class MQTTClient:
 
         # Connect with a timeout.
         try:
-            pipe = await asyncio.wait_for(mqtt_connect(self, keep_alive), timeout)
+            pipe = asyncio.wait_for(mqtt_connect(self, keep_alive), timeout)
         except asyncio.TimeoutError as exc:
             raise ConnectionError("MQTT connection timeout.") from exc
 
@@ -195,8 +196,13 @@ class MQTTClient:
         # self.pipe is already set when the dispatcher's reconnect loop first runs,
         # avoiding a race condition between the two.
         if pipe and self.dispatcher_task is None:
-            self.dispatcher_task = asyncio.create_task(
-                async_wrap_errors(
+            # The dispatcher is a long-lived republish loop.  Under asyncio
+            # it was a background task; in the sync model it is a goroutine.
+            # (The async strip would otherwise run dispatcher(...) eagerly
+            # here and never return -- it loops until self.is_closed.)
+            def run_dispatcher():
+                """Run the republish dispatcher loop on its own goroutine."""
+                try:
                     dispatcher(
                         self,
                         republish_duration=self.republish_duration,
@@ -205,8 +211,10 @@ class MQTTClient:
                         ignore_acked=ignore_acked,
                         reconnect_delay=reconnect_delay,
                     )
-                )
-            )
+                except Exception:
+                    log("mqtt dispatcher exited on error")
+
+            self.dispatcher_task = runloom.go(run_dispatcher)
 
         return pipe
 
@@ -242,7 +250,7 @@ class MQTTClient:
         self.last_send = self.get_time()
         return ordered_ack_send(self, msg, dest_pk_hex, queue_id_hex, msg_type, seq_no)
 
-    async def queue_msg_async(
+    def queue_msg_async(
         self,
         msg,
         dest_pk_hex,
@@ -259,11 +267,11 @@ class MQTTClient:
         """
         queue_id_hex = queue_id_hex or to_h(rand_b(32))
         self.last_send = self.get_time()
-        return await ordered_ack_send_async(
+        return ordered_ack_send_async(
             self, msg, dest_pk_hex, queue_id_hex, msg_type, seq_no,
         )
 
-    async def send_probe(
+    def send_probe(
         self,
         dest_pk_hex,
         queue_id_hex=None,
@@ -332,11 +340,11 @@ class MQTTClient:
         # peer (resolved via process_app_ack into app_ack above).
         buf, _ = self.publish(dest_pk_hex, out)
         if self.pipe and not self.pipe.on_close.is_set():
-            await self.pipe.send(buf)
+            self.pipe.send(buf)
 
         return (queue_id_hex, seq_no), app_ack
 
-    async def send_probe_ack(
+    def send_probe_ack(
         self,
         dest_pk_hex,
         queue_id_hex,
@@ -391,7 +399,7 @@ class MQTTClient:
 
         buf, _ = self.publish(dest_pk_hex, out)
         if self.pipe and not self.pipe.on_close.is_set():
-            await self.pipe.send(buf)
+            self.pipe.send(buf)
 
     # Stops broadcasting a msg.
     def dequeue_msg(
@@ -446,7 +454,7 @@ class MQTTClient:
         self.packet_ids = {MQTTEnum.SUBACK: {}, MQTTEnum.PUBACK: {}}
         self.sent_msg_ids = {}
 
-    async def close(self):
+    def close(self):
         """Cleanly shut down the dispatcher, send DISCONNECT, and close the pipe."""
         # Already closed.
         if self.is_closed.is_set():
@@ -455,9 +463,10 @@ class MQTTClient:
         # Indicate closed to block other callers.
         self.is_closed.set()
 
-        # Cancel message dispatcher bg task and wait for it to exit cleanly
-        # so its CancelledError handler runs before we close the pipe.
-        await cancel_task(self.dispatcher_task)
+        # The dispatcher goroutine loops `while not self.is_closed`; setting
+        # is_closed above makes it exit on its own (a runloom Goroutine has
+        # no .cancel()).  It checks the flag each `interval`, so it drains
+        # within one loop period without us blocking close() on it here.
         self.dispatcher_task = None
 
         # Cleanly disconnect from the MQTT server.
@@ -465,23 +474,23 @@ class MQTTClient:
         if self.pipe:
             # Disconnect packet.
             disconnect_buf = build_disconnect()
-            await async_wrap_errors(self.pipe.send(disconnect_buf))
+            async_wrap_errors(self.pipe.send(disconnect_buf))
 
             # Close pipe.
-            await self.pipe.close()
+            self.pipe.close()
             self.pipe = None
 
-    async def __aenter__(self):
+    def __enter__(self):
         """Connect on context manager entry."""
-        await self.connect()
+        self.connect()
         return self
 
-    async def __aexit__(self, *_):
+    def __exit__(self, *_):
         """Close on context manager exit."""
-        await self.close()
+        self.close()
         return False
 
-    async def ping_handler(self):
+    def ping_handler(self):
         """Handle a PINGRESP from the server.
 
         MQTT keepalive is confirmed purely by receipt of the PINGRESP, so
@@ -491,11 +500,11 @@ class MQTTClient:
         return
 
 
-async def demo_mqtt():
+def demo_mqtt():
     """Demo: connect two clients (Alice and Bob) and send a message."""
     nic = Interface("default")
 
-    async def msg_handler(
+    def msg_handler(
         msg, src_pk_hex, queue_id_hex, client
     ):
         """Print the received message, sender public key, and queue ID during the demo."""
@@ -509,8 +518,8 @@ async def demo_mqtt():
     bob_client.add_msg_handler(msg_handler)
 
     try:
-        await alice_client.connect()
-        await bob_client.connect()
+        alice_client.connect()
+        bob_client.connect()
 
         _, bob_ack = alice_client.queue_msg(
             "hello bob -- with ordering and ack",
@@ -518,11 +527,11 @@ async def demo_mqtt():
             alice_queue_id,
         )
 
-        await bob_ack
-        await asyncio.sleep(4)
+        bob_ack
+        asyncio.sleep(4)
     finally:
-        await alice_client.close()
-        await bob_client.close()
+        alice_client.close()
+        bob_client.close()
 
 
 if __name__ == "__main__":

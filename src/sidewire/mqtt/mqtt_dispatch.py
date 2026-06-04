@@ -13,15 +13,15 @@ from .mqtt_msgs import build_ping
 
 
 # Cleanup handled by mqtt_client.close.
-async def safe_pipe_send(client, buf):
+def safe_pipe_send(client, buf):
     """Send bytes on the client pipe only if it is open, returning True on success."""
     if not client.pipe or client.pipe.on_close.is_set():
         return False
-    await async_wrap_errors(client.pipe.send(buf))
+    async_wrap_errors(client.pipe.send(buf))
     return True
 
 
-async def dispatcher(
+def dispatcher(
     client,
     republish_duration,
     interval,
@@ -38,14 +38,14 @@ async def dispatcher(
         while not client.is_closed.is_set():
             # Conditional used for testing.
             if reconnect_delay:
-                await asyncio.sleep(reconnect_delay)
+                asyncio.sleep(reconnect_delay)
 
             # Ensure pipe is alive before attempting to send.
             try:
-                await reconnect_loop(client, keep_alive)
+                reconnect_loop(client, keep_alive)
             except (OSError, ConnectionError, asyncio.TimeoutError):
                 log_exception()
-                await asyncio.sleep(1)
+                asyncio.sleep(1)
                 continue
 
             # Process all messages in the queues.
@@ -53,7 +53,7 @@ async def dispatcher(
             for meta in iter_all_messages(client.msg_queues):
                 if not client.pipe or client.pipe.on_close.is_set():
                     break
-                await republish_meta(
+                republish_meta(
                     client,
                     meta,
                     now,
@@ -63,12 +63,12 @@ async def dispatcher(
                 )
 
             # Used to know when to send a ping.
-            await asyncio.sleep(0.5)
+            asyncio.sleep(0.5)
 
             # Keep-alive heartbeat.
             last_ping, ping_buf = build_ping(last_ping, keep_alive, client.get_time)
             if ping_buf:
-                await safe_pipe_send(client, ping_buf)
+                safe_pipe_send(client, ping_buf)
                 prune_msg_ids(client, now)
     except asyncio.CancelledError:
         raise
@@ -76,7 +76,7 @@ async def dispatcher(
         log_exception()
 
 
-async def republish_meta(
+def republish_meta(
     client,
     meta,
     now,
@@ -133,4 +133,4 @@ async def republish_meta(
     )
 
     # Broadcast new message.
-    await safe_pipe_send(client, buf)
+    safe_pipe_send(client, buf)

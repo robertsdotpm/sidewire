@@ -6,7 +6,7 @@ from .utils import get_msg_from_queue
 
 
 # Function called for new application (type=msg) publishes.
-async def process_app_msg(client, app_packet):
+def process_app_msg(client, app_packet):
     """Deliver a received application message to registered handlers and enqueue an ACK back to the sender."""
     # Using the integer directly from the object.
     seq_no = app_packet.seq_no
@@ -39,7 +39,7 @@ async def process_app_msg(client, app_packet):
             )
 
             # Republish the application ack to sender.
-            await async_wrap_errors(client.pipe.send(out))
+            async_wrap_errors(client.pipe.send(out))
 
             return
 
@@ -48,7 +48,7 @@ async def process_app_msg(client, app_packet):
     # SHA256 via the shared aionetiface.utility.signing helper so the
     # loop stays free for concurrent MQTT readers; the digest is
     # payload-size-proportional and runs on every inbound publish.
-    msg_hash = await sha256_hex_async(to_b(msg))
+    msg_hash = sha256_hex_async(to_b(msg))
     if msg_hash not in client.recv_msg_ids:
         # Stamp before awaiting handlers so concurrent clients sharing
         # recv_msg_ids don't slip past the check during an await yield.
@@ -56,20 +56,20 @@ async def process_app_msg(client, app_packet):
 
         # Trigger registered app handlers
         for msg_handler in client.msg_handlers:
-            await async_wrap_errors(msg_handler(msg, src_pk, queue_id, client))
+            async_wrap_errors(msg_handler(msg, src_pk, queue_id, client))
 
     # Send Application ACK back to sender.  Async variant offloads
     # the ECDSA sign to the default thread pool executor so the
     # MQTT-reader loop isn't stalled per inbound MSG.
     try:
-        await client.queue_msg_async("ack", src_pk, queue_id, MsgEnum.MSGACK, seq_no=seq_no)
+        client.queue_msg_async("ack", src_pk, queue_id, MsgEnum.MSGACK, seq_no=seq_no)
     except (ValueError, KeyError):
         log_exception()
 
 
 # Function called for new application (type=probe) publishes.
 # ACKs the sender so discovery works, but never calls user handlers.
-async def process_app_probe(client, app_packet):
+def process_app_probe(client, app_packet):
     """Respond to a probe packet with a direct-published ACK.
 
     The probe round-trip is time-bounded: the originator's
@@ -104,7 +104,7 @@ async def process_app_probe(client, app_packet):
     # re-introduce the jitter/backoff delay that was breaking
     # cross-cohort probe acks.
     try:
-        await client.send_probe_ack(
+        client.send_probe_ack(
             app_packet.src_pk_hex,
             app_packet.queue_id_hex,
             seq_no=app_packet.seq_no,

@@ -4,7 +4,7 @@ from .mqtt_proto import handle_mqtt_packet
 
 
 # TCP streaming protocol handler for MQTT.
-async def mqtt_packet_reader(
+def mqtt_packet_reader(
     client, chunk, client_tup, pipe
 ):
     """Buffer incoming TCP data and dispatch complete MQTT packets to the protocol handler."""
@@ -42,4 +42,4 @@ async def mqtt_packet_reader(
 
         # Parse + handle.
         pkt = mqtt_parse_packet(pkt_buf)
-        await async_wrap_errors(handle_mqtt_packet(client, pkt))
+        async_wrap_errors(handle_mqtt_packet(client, pkt))

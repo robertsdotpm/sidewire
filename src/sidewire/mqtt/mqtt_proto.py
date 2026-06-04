@@ -18,19 +18,19 @@ from .mqtt_msgs import build_puback
 
 
 # mqtt_packet_reader sends full packets to this func to handle.
-async def handle_mqtt_packet(client, packet):
+def handle_mqtt_packet(client, packet):
     """Dispatch a fully assembled MQTT packet to the appropriate handler based on its type."""
     # MQTT server acks a publish or a channel subscribe.
     if packet.type in (MQTTEnum.PUBACK, MQTTEnum.SUBACK):
-        await handle_broker_ack(client, packet)
+        handle_broker_ack(client, packet)
 
     # We receive a new message from a topic we're subscribed to.
     elif packet.type == MQTTEnum.PUBLISH:
-        await handle_publish(client, packet)
+        handle_publish(client, packet)
 
     # The server responds to our ping.
     elif packet.type == MQTTEnum.PINGRESP:
-        await client.ping_handler()
+        client.ping_handler()
 
 
 # MQTT packets for publish, puback, subscribe, suback, have packet IDs.
@@ -38,7 +38,7 @@ async def handle_mqtt_packet(client, packet):
 # The future is resolved for acks back from server. Currently, since
 # the software uses app-level ACKS no packet-level awaits are used for
 # these futures but acking here does mean the packet ID should be freed.
-async def handle_broker_ack(client, packet):
+def handle_broker_ack(client, packet):
     """Resolve the pending Future for a PUBACK or SUBACK packet and free its packet ID."""
     # Extract packet ID from packet.
     packet_id = packet.body[:2]
@@ -66,7 +66,7 @@ async def handle_broker_ack(client, packet):
 # Handles receiving a new message for our ECDSA pub hex topic sub.
 # Messages fall into either acks for a past message or new messages.
 # The software validates signatures and sets futures for acks.
-async def handle_publish(client, packet):
+def handle_publish(client, packet):
     """Validate, authenticate, and route an inbound PUBLISH packet to the correct application handler."""
     # Publish-specific function for parsing a packet.
     parsed = mqtt_parse_publish(packet)
@@ -78,7 +78,7 @@ async def handle_publish(client, packet):
     topic, payload, packet_id = parsed
     if packet_id:
         puback_buf = build_puback(packet_id)
-        await client.pipe.send(puback_buf)
+        client.pipe.send(puback_buf)
 
     # Key Check: Is this message meant for us?
     # Comparing binary to binary for safety.
@@ -96,7 +96,7 @@ async def handle_publish(client, packet):
     # Verify signature and extract fields.  unpack_async runs the
     # ECDSA verify (~2-10ms) on the default thread pool executor so
     # the loop stays free for concurrent broker readers.
-    app_packet = await AppPacket.unpack_async(payload)
+    app_packet = AppPacket.unpack_async(payload)
     if app_packet is None:
         log(fstr(
             "[MQTT-RX] handle_publish: AppPacket.unpack returned None (broker={0}; "
@@ -134,8 +134,8 @@ async def handle_publish(client, packet):
 
     # Route to application logic based on message type.
     if app_packet.msg_type == MsgEnum.MSG:
-        await process_app_msg(client, app_packet)
+        process_app_msg(client, app_packet)
     elif app_packet.msg_type == MsgEnum.MSGACK:
         process_app_ack(client, app_packet)
     elif app_packet.msg_type == MsgEnum.PROBE:
-        await process_app_probe(client, app_packet)
+        process_app_probe(client, app_packet)

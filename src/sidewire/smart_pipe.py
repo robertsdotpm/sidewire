@@ -23,7 +23,7 @@ class SmartPipe:
         # subscription is live there.
         self.hint_brokers = hint_brokers or []
 
-    async def resolve_hint_clients(self):
+    def resolve_hint_clients(self):
         """Connect to each hint broker (if reachable) and return matching MQTTClient instances.
 
         Walks self.hint_brokers (the destination's advertised
@@ -68,7 +68,7 @@ class SmartPipe:
         if not to_try:
             return []
 
-        results = await asyncio.gather(
+        results = asyncio.gather(
             *[try_client(self.dest_pub_hex, c, connect_timeout=8) for c in to_try],
             return_exceptions=True,
         )
@@ -88,18 +88,18 @@ class SmartPipe:
         ))
         return out
 
-    async def connect(self, msg_cb=None):
+    def connect(self, msg_cb=None):
         """Resolve destination clients: hint brokers first, falling back to rendezvous."""
         if not self.clients:
             # Try hint brokers first. If we get at least one, use
             # the hint set -- the dest is guaranteed subscribed.
             if self.hint_brokers:
-                self.clients = await self.resolve_hint_clients()
+                self.clients = self.resolve_hint_clients()
 
             # Fall back to rendezvous discovery if hints didn't
             # produce any reachable clients.
             if not self.clients:
-                self.clients = await get_dest_clients(
+                self.clients = get_dest_clients(
                     self.router.af_group,
                     self.dest_pub_hex,
                     self.router.servers,
@@ -112,7 +112,7 @@ class SmartPipe:
 
         return self
 
-    async def send(self, msg, timeout=4):
+    def send(self, msg, timeout=4):
         """Send a message to the destination, returning the byte length on success or 0 on failure."""
         msg_id_hex = to_h(rand_b(32))
 
@@ -132,7 +132,7 @@ class SmartPipe:
 
         try:
             while tasks:
-                done, pending = await asyncio.wait(
+                done, pending = asyncio.wait(
                     tasks, return_when=asyncio.FIRST_COMPLETED
                 )
 
@@ -140,12 +140,12 @@ class SmartPipe:
                     winner = client_by_task.get(task)
                     winner_host = getattr(winner, "host", "?") if winner else "?"
                     try:
-                        await task
+                        task
 
                         for p in pending:
                             p.cancel()
 
-                        await asyncio.gather(*pending, return_exceptions=True)
+                        asyncio.gather(*pending, return_exceptions=True)
 
                         return len(msg)
 
@@ -168,14 +168,14 @@ class SmartPipe:
                 if not task.done():
                     task.cancel()
 
-            await asyncio.gather(*tasks, return_exceptions=True)
+            asyncio.gather(*tasks, return_exceptions=True)
 
             for client in self.clients:
                 client.dequeue_msg(msg_id_hex)
 
         return 0
 
-    async def close(self):
+    def close(self):
         """Evict cached clients from the router; do NOT close them.
 
         SmartPipe borrows MQTTClient instances from the Router's shared
@@ -187,12 +187,12 @@ class SmartPipe:
         for client in self.clients:
             self.router.evict_client_from_cache(client)
 
-    async def __aenter__(self):
+    def __enter__(self):
         """Connect on context manager entry."""
-        await self.connect()
+        self.connect()
         return self
 
-    async def __aexit__(self, *_):
+    def __exit__(self, *_):
         """Close on context manager exit."""
-        await self.close()
+        self.close()
         return False

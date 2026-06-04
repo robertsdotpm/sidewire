@@ -104,7 +104,7 @@ class AppPacket:
         # Full wire layout: src_pk(33) + sig(64) + signed_msg.
         return compact_pk + sig + signed_msg
 
-    async def pack_async(self, client):
+    def pack_async(self, client):
         """Async wrapper around pack() that runs the ECDSA sign on the
         default thread pool executor via the shared
         aionetiface.utility.signing.ecdsa_sign_async helper.  Same
@@ -137,7 +137,7 @@ class AppPacket:
             + struct.pack("!B", self.msg_type)
             + msg_bytes
         )
-        sig = await ecdsa_sign_async(
+        sig = ecdsa_sign_async(
             client.kp.private_key, signed_msg,
             sigencode=util.sigencode_string,
         )
@@ -193,7 +193,7 @@ class AppPacket:
         )
 
     @classmethod
-    async def unpack_async(cls, payload):
+    def unpack_async(cls, payload):
         """Async variant of unpack() that runs the ECDSA verify on the
         default thread pool executor via the shared
         aionetiface.utility.signing.ecdsa_verify_async helper.  Same
@@ -213,7 +213,7 @@ class AppPacket:
             signed_msg = bytes(payload[SIGNED_MSG_OFFSET:])
 
             vk = VerifyingKey.from_string(src_pk_bytes, curve=SECP256k1)
-            await ecdsa_verify_async(
+            ecdsa_verify_async(
                 vk, sig_bytes, signed_msg,
                 sigdecode=util.sigdecode_string,
             )

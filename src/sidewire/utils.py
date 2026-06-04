@@ -73,7 +73,7 @@ def rendezvous_hash(nic, pub_key_hex, servers):
     return af_buckets
 
 
-async def try_client(
+def try_client(
     dest_pub_hex,
     client,
     connect_timeout=15,
@@ -117,7 +117,7 @@ async def try_client(
             if (now - client.last_connect) < retry_duration:
                 return None
         try:
-            await asyncio.wait_for(client.connect(), connect_timeout)
+            asyncio.wait_for(client.connect(), connect_timeout)
         except (OSError, ConnectionError, asyncio.TimeoutError) as exc:
             client.last_connect = now
             return None
@@ -125,7 +125,7 @@ async def try_client(
     return client
 
 
-async def get_dest_clients(
+def get_dest_clients(
     nic,
     dest_pub_hex,
     servers,
@@ -207,7 +207,7 @@ async def get_dest_clients(
             af = iana_to_af.get(int(hint["af"]), int(hint["af"]))
             cached_by_af.setdefault(af, []).append((hint["host"], hint))
 
-    async def walk_af(nic_af, cap):
+    def walk_af(nic_af, cap):
         """Connect `needed` brokers for one address family, capped at `cap` seconds."""
         sorted_servers = af_buckets[nic_af]
         candidate_clients = []
@@ -265,16 +265,16 @@ async def get_dest_clients(
         ]
         af_found = []
 
-        async def collect():
+        def collect():
             for fut in asyncio.as_completed(tasks):
-                r = await fut
+                r = fut
                 if r:
                     af_found.append(r)
                     if len(af_found) >= needed:
                         return
 
         try:
-            await asyncio.wait_for(collect(), timeout=cap)
+            asyncio.wait_for(collect(), timeout=cap)
         except asyncio.TimeoutError:
             # cap hit -- take whatever connected so far.
             pass
@@ -295,7 +295,7 @@ async def get_dest_clients(
     # preserves input order, so found_clients keeps af-bucket order.
     af_keys = list(af_buckets)
     dest_stage("walks_start")
-    per_af_results = await asyncio.gather(
+    per_af_results = asyncio.gather(
         *[walk_af(nic_af, WALK_CAP) for nic_af in af_keys]
     )
     dest_stage("walks_done")
@@ -318,7 +318,7 @@ async def get_dest_clients(
                 "(cap={1}s); retrying once at {2}s before giving up",
                 (dest_pub_hex[:12], WALK_CAP, RETRY_WALK_CAP),
             ))
-            per_af_results = await asyncio.gather(
+            per_af_results = asyncio.gather(
                 *[walk_af(nic_af, RETRY_WALK_CAP) for nic_af in af_keys]
             )
             for af_found in per_af_results:

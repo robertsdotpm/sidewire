@@ -101,7 +101,7 @@ def ordered_ack_send(
     return (queue_id_hex, seq_no), app_ack
 
 
-async def ordered_ack_send_async(
+def ordered_ack_send_async(
     client,
     msg,
     dest_pk_hex,
@@ -144,7 +144,7 @@ async def ordered_ack_send_async(
     )
     # The only behavioural difference vs ordered_ack_send: pack_async
     # offloads the ECDSA sign to the default thread pool executor.
-    out = await packet.pack_async(client)
+    out = packet.pack_async(client)
 
     if seq_no in client.msg_queues[msg_type][queue_id_hex]:
         existing = client.msg_queues[msg_type][queue_id_hex][seq_no]

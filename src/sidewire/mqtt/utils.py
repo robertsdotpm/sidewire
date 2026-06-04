@@ -115,7 +115,7 @@ def get_packet_id(client):
 # Mostly used to test ping resps are received.
 
 
-async def blank_ping_handler(self):
+def blank_ping_handler(self):
     """No-op ping handler used as a default when no ping response processing is needed."""
 
 
